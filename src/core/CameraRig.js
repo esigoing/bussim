@@ -32,10 +32,12 @@ export class CameraRig {
     const cam = this.camera;
 
     if (this.mode === 'cockpit' || this.mode === 'cabin') {
+      // Beide Innenkameras blicken nach vorn (-z); die Fahrgastkamera
+      // sitzt hinten im Bus und schaut durch den Gang zum Fahrer.
       const eye = this.mode === 'cockpit' ? DRIVER_EYE : CABIN_EYE;
       busGroup.localToWorld(_pos.copy(eye));
       cam.position.copy(_pos);
-      _qYaw.setFromAxisAngle(Y_AXIS, input.lookYaw + (this.mode === 'cabin' ? Math.PI : 0));
+      _qYaw.setFromAxisAngle(Y_AXIS, input.lookYaw);
       _qPitch.setFromAxisAngle(X_AXIS, input.lookPitch);
       cam.quaternion.copy(busGroup.quaternion).multiply(_qYaw).multiply(_qPitch);
       return;
