@@ -5,6 +5,7 @@
 // dadurch keine Spiegel-in-Spiegel-Rekursion. Regen liegt auf Layer 2.
 
 import * as THREE from 'three';
+import { DRIVER_EYE } from '../cockpit/Cockpit.js';
 
 const CONFIGS = {
   left: {
@@ -64,20 +65,26 @@ export class Mirrors {
       rt.texture.repeat.x = -1;
       rt.texture.offset.x = 1;
 
+      // Spiegelfläche exakt aufs Fahrerauge ausrichten (Bus-Lokalraum) —
+      // damit ist sie aus Fahrersicht garantiert sichtbar.
+      const toEye = DRIVER_EYE.clone().sub(anchor.pos).normalize();
+      const faceQuat = new THREE.Quaternion().setFromUnitVectors(
+        new THREE.Vector3(0, 0, 1), toEye
+      );
+
       const plane = new THREE.Mesh(new THREE.PlaneGeometry(cfg.size[0], cfg.size[1]), mat);
       plane.position.copy(anchor.pos);
-      plane.rotation.y = cfg.planeRotY;
+      plane.quaternion.copy(faceQuat);
       plane.layers.set(1);
       busGroup.add(plane);
 
-      // Rahmen
+      // Rahmen als Rückwand: 4 mm hinter der Fläche (vom Fahrer weg)
       const frame = new THREE.Mesh(
         new THREE.PlaneGeometry(cfg.size[0] + 0.03, cfg.size[1] + 0.03),
-        new THREE.MeshStandardMaterial({ color: 0x101113, roughness: 0.5 })
+        new THREE.MeshStandardMaterial({ color: 0x101113, roughness: 0.5, side: THREE.DoubleSide })
       );
-      frame.position.copy(anchor.pos);
-      frame.position.z += 0.004;
-      frame.rotation.y = cfg.planeRotY;
+      frame.position.copy(anchor.pos).addScaledVector(toEye, -0.004);
+      frame.quaternion.copy(faceQuat);
       busGroup.add(frame);
 
       this.mirrors.push({ rt, cam, plane });

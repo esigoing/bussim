@@ -47,16 +47,18 @@ export class SteeringColumn {
 
     this.group.add(this.wheelGroup);
 
-    // Blinkerhebel (links an der Säule)
+    // Blinkerhebel: an der Säule UNTER dem Kranz, ragt nach links-unten
+    // deutlich über den Kranz (r = 0.235) hinaus — kein Kontakt zum Rad.
     this.stalk = new THREE.Group();
-    this.stalk.position.set(-0.06, -0.06, 0.05);
+    this.stalk.position.set(-0.04, -0.14, 0.16);
     this.stalk.rotation.x = this.tilt;
-    const lever = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.013, 0.16, 8), rimMat);
+    this.stalk.rotation.z = -0.25; // leicht nach unten geneigt
+    const lever = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.013, 0.22, 8), rimMat);
     lever.rotation.z = Math.PI / 2;
-    lever.position.x = -0.08;
+    lever.position.x = -0.13;
     this.stalk.add(lever);
     const knob = new THREE.Mesh(new THREE.SphereGeometry(0.016, 10, 8), rimMat);
-    knob.position.x = -0.16;
+    knob.position.x = -0.25;
     this.stalk.add(knob);
     this.group.add(this.stalk);
 
@@ -86,9 +88,9 @@ export class SteeringColumn {
     this.wheelGroup.rotation.order = 'XYZ';
     this.wheelGroup.rotation.z = bus.steeringWheelAngle;
 
-    // Blinkerhebel: hoch = rechts, runter = links
+    // Blinkerhebel: hoch = rechts, runter = links (um die Grundneigung)
     const target = bus.hazard ? 0 : bus.blinker * -0.28;
     this._stalkAngle = damp(this._stalkAngle, target, 14, dt);
-    this.stalk.rotation.z = this._stalkAngle;
+    this.stalk.rotation.z = -0.25 + this._stalkAngle;
   }
 }

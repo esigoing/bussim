@@ -436,7 +436,8 @@ export class BusModel {
     const positionsL = [
       [-1.05, GROUND_Y + 0.66, FRONT_Z - 0.015, blinkerGeo],
       [-0.95, GROUND_Y + 1.15, BACK_Z + 0.01, blinkerGeo],
-      [-HALF_W - 0.005, GROUND_Y + 1.0, -4.8, sideBlinkGeo],
+      // Seitenblinker auf z=-4.0: liegt im Wandsegment zwischen Tür 1 und 2
+      [-HALF_W - 0.005, GROUND_Y + 1.0, -4.0, sideBlinkGeo],
     ];
     const positionsR = positionsL.map(([x, y, z, g]) => [-x, y, z, g]);
     for (const [x, y, z, g] of positionsL) {

@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { damp, clamp, smoothstep, lerp } from '../utils/Math3D.js';
+import { warpedFbm2 } from '../utils/Noise.js';
 import { setWetness } from './materials/Wetness.js';
 import { Events } from '../core/Events.js';
 
@@ -80,7 +81,56 @@ export class SceneEnv {
 
     scene.fog = new THREE.Fog(0xb8c4d4, 60, quality.drawDistance);
 
+    // Wolkenkuppel: das Sky-Addon kennt keine Wolken — eine FBM-texturierte
+    // Halbkugel über der Szene wird je nach Bewölkung eingeblendet und
+    // zieht langsam (Rotation). Bei „bedeckt/Regen" deckt sie alles grau zu.
+    this._cloudMat = new THREE.MeshBasicMaterial({
+      map: this._makeCloudTexture(),
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      side: THREE.BackSide,
+      fog: false,
+      toneMapped: true,
+    });
+    this.cloudDome = new THREE.Mesh(
+      new THREE.SphereGeometry(6800, 32, 16, 0, Math.PI * 2, 0, Math.PI * 0.55),
+      this._cloudMat
+    );
+    this.cloudDome.renderOrder = -1;
+    scene.add(this.cloudDome);
+
     this._sunPos = new THREE.Vector3();
+  }
+
+  _makeCloudTexture() {
+    // Graustufen-Wolken: RGB = Wolkenhelligkeit, Alpha = Deckung.
+    // Dichte Basisdecke mit aufgerissenen Rändern — über die Material-
+    // Opacity wird daraus alles von Schleier bis geschlossener Decke.
+    const size = 512;
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const ctx = c.getContext('2d');
+    const img = ctx.createImageData(size, size);
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const u = x / size, v = y / size;
+        const n = warpedFbm2(u * 6, v * 6, 4, 777, 1.8);
+        const a = clamp((n - 0.32) * 2.2, 0, 1);
+        const bright = 150 + n * 80;
+        const i = (y * size + x) * 4;
+        img.data[i] = bright;
+        img.data[i + 1] = bright;
+        img.data[i + 2] = bright + 6;
+        img.data[i + 3] = a * 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(3, 2);
+    return tex;
   }
 
   setTimeOfDay(t) {
@@ -155,6 +205,13 @@ export class SceneEnv {
     const nightFog = new THREE.Color(0x0a0e18);
     this.scene.fog.color.copy(dayFog).lerp(nightFog, this.night);
     this.scene.background = null; // Sky-Mesh füllt den Hintergrund
+
+    // --- Wolkenkuppel: Deckung, Helligkeit und langsamer Wolkenzug
+    // (überproportional: schon „bedeckt" schließt die Decke fast komplett)
+    this._cloudMat.opacity = clamp(this.cloud * 1.25, 0, 1);
+    const cloudLum = lerp(1.0, 0.55, this.rain) * lerp(0.06, 1, 1 - this.night);
+    this._cloudMat.color.setScalar(cloudLum);
+    this.cloudDome.rotation.y += dt * 0.0025;
 
     // --- Belichtung: nachts etwas auf
     this.renderer.toneMappingExposure = lerp(0.85, 1.25, this.night);
