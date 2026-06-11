@@ -79,10 +79,10 @@ export class SteeringColumn {
   }
 
   update(dt, bus) {
-    // Lenkrad dreht um seine lokale Z-Achse
+    // Lenkrad dreht um seine lokale Z-Achse (rechts lenken = im Uhrzeigersinn)
     this.wheelGroup.rotation.y = 0;
     this.wheelGroup.rotation.order = 'XYZ';
-    this.wheelGroup.rotation.z = -bus.steeringWheelAngle;
+    this.wheelGroup.rotation.z = bus.steeringWheelAngle;
 
     // Blinkerhebel: hoch = rechts, runter = links
     const target = bus.hazard ? 0 : bus.blinker * -0.28;

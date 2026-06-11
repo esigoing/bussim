@@ -52,30 +52,33 @@ export class LaneGraph {
     return e;
   }
 
-  // Nächste 'lane'-Kante zu einer Weltposition mit Richtungspräferenz
+  // Nächste 'lane'-Kante zu einer Weltposition mit Richtungspräferenz.
+  // Kanten sind Polylines (Kurven!) → segmentweise Projektion.
   nearestLane(pos, fwd, maxDist = 8) {
     let best = null, bestScore = Infinity;
     for (const e of this.edges) {
       if (e.type !== 'lane') continue;
       if (pos.x < e.minX - maxDist || pos.x > e.maxX + maxDist) continue;
       if (pos.z < e.minZ - maxDist || pos.z > e.maxZ + maxDist) continue;
-      // Projektion auf die (gerade) Kante
-      const a = e.curve.points[0], b = e.curve.points[e.curve.points.length - 1];
-      const abx = b.x - a.x, abz = b.z - a.z;
-      const len2 = abx * abx + abz * abz;
-      let t = ((pos.x - a.x) * abx + (pos.z - a.z) * abz) / len2;
-      t = Math.max(0, Math.min(1, t));
-      const px = a.x + abx * t, pz = a.z + abz * t;
-      const dx = pos.x - px, dz = pos.z - pz;
-      const dist = Math.sqrt(dx * dx + dz * dz);
-      if (dist > maxDist) continue;
-      // Richtungsbonus: Kante soll in Fahrtrichtung zeigen
-      const il = 1 / Math.sqrt(len2);
-      const dot = fwd ? (fwd.x * abx * il + fwd.z * abz * il) : 1;
-      const score = dist - dot * 3;
-      if (score < bestScore) {
-        bestScore = score;
-        best = { edge: e, s: t * e.length, dist };
+      const pts = e.curve.points;
+      for (let k = 0; k < pts.length - 1; k++) {
+        const a = pts[k], b = pts[k + 1];
+        const abx = b.x - a.x, abz = b.z - a.z;
+        const len2 = abx * abx + abz * abz;
+        if (len2 < 1e-9) continue;
+        let t = ((pos.x - a.x) * abx + (pos.z - a.z) * abz) / len2;
+        t = Math.max(0, Math.min(1, t));
+        const px = a.x + abx * t, pz = a.z + abz * t;
+        const dx = pos.x - px, dz = pos.z - pz;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        if (dist > maxDist) continue;
+        const il = 1 / Math.sqrt(len2);
+        const dot = fwd ? (fwd.x * abx * il + fwd.z * abz * il) : 1;
+        const score = dist - dot * 3;
+        if (score < bestScore) {
+          bestScore = score;
+          best = { edge: e, s: e.curve.cum[k] + t * Math.sqrt(len2), dist };
+        }
       }
     }
     return best;

@@ -84,7 +84,11 @@ export class Game {
     this.bus = new Bus(this.world);
     const stop0 = this.city.route.stops[0];
     const yaw = Math.atan2(-stop0.dir.x, -stop0.dir.z);
-    this.bus.body.position.set(stop0.pos.x - stop0.dir.x * 14, 1.4, stop0.pos.z - stop0.dir.z * 14);
+    this.bus.body.position.set(
+      stop0.pos.x - stop0.dir.x * 14,
+      stop0.pos.y + 1.4,
+      stop0.pos.z - stop0.dir.z * 14
+    );
     this.bus.body.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
     this.bus.body.prevPosition.copy(this.bus.body.position);
     this.bus.body.prevQuaternion.copy(this.bus.body.quaternion);
@@ -106,6 +110,7 @@ export class Game {
     this.passengers = new PassengerSystem({
       scene: this.scene, bus: this.bus, busModel: this.busModel,
       route: this.city.route, ticketFlow: this.ticketFlow, rand: this.rand.fork(123),
+      groundY: (x, z) => this.city.groundHeight(x, z),
     });
     this.traffic = new TrafficSystem({
       graph: this.city.roadNet.graph, rand: this.rand.fork(321), parent: this.scene,

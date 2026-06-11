@@ -109,29 +109,41 @@ export class BusModel {
     floor.map.repeat.set(3, 14);
     floor.normalMap.repeat.set(3, 14);
     floor.roughnessMap.repeat.set(3, 14);
-    this.floorMat = Mat.std({ ...floor, color: 0x9b9489 });
-    this.innerWallMat = Mat.std({ color: 0xd8dadc, roughness: 0.85 });
-    this.ceilingMat = Mat.std({ color: 0xe8eaec, roughness: 0.9 });
+    // (envMapIntensity siehe unten — Innenmaterialien gedämpft)
+    // Innenraum: Himmels-IBL stark dämpfen, sonst wirkt alles eisblau
+    this.floorMat = Mat.std({ ...floor, color: 0x9b9489, envMapIntensity: 0.12 });
+    this.innerWallMat = Mat.std({ color: 0xd8dadc, roughness: 0.85, envMapIntensity: 0.15 });
+    this.ceilingMat = Mat.std({ color: 0xe8eaec, roughness: 0.9, envMapIntensity: 0.15 });
     const dash = dashPlasticTextures();
-    this.dashMat = Mat.std({ ...dash, color: 0xffffff });
+    this.dashMat = Mat.std({ ...dash, color: 0xffffff, envMapIntensity: 0.12 });
   }
 
   _buildHull() {
     const hullH = ROOF_Y - (GROUND_Y + 0.32);
     const hullCY = (ROOF_Y + GROUND_Y + 0.32) / 2;
 
-    // Drei Rumpf-Segmente: unter den Fenstern, Fensterholme macht _buildWindows
-    const lower = new THREE.Mesh(
-      new RoundedBoxGeometry(HALF_W * 2, 1.05, 12, 3, 0.08),
-      this.paintMat
-    );
-    lower.position.set(0, GROUND_Y + 0.32 + 1.05 / 2 - 0.02, 0);
-    this.group.add(lower);
+    // Rumpf unter den Fenstern: SEITENWÄNDE statt Vollkörper —
+    // der Innenraum muss frei bleiben (Niederflur-Boden liegt bei FLOOR_Y).
+    const lowerY = GROUND_Y + 0.32 + 1.05 / 2 - 0.02;
+    for (const sx of [-1, 1]) {
+      const side = new THREE.Mesh(
+        new RoundedBoxGeometry(0.07, 1.05, 12, 2, 0.03),
+        this.paintMat
+      );
+      side.position.set(sx * (HALF_W - 0.035), lowerY, 0);
+      this.group.add(side);
+    }
+    // Unterboden-Verkleidung (von außen sichtbarer dunkler Sockel)
+    const belly = new THREE.Mesh(new THREE.BoxGeometry(HALF_W * 2 - 0.1, 0.3, 11.9), this.skirtMat);
+    belly.position.set(0, FLOOR_Y - 0.2, 0);
+    this.group.add(belly);
 
-    // Akzentstreifen
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(HALF_W * 2 + 0.015, 0.16, 11.98), this.accentMat);
-    stripe.position.set(0, GROUND_Y + 1.18, 0);
-    this.group.add(stripe);
+    // Akzentstreifen: zwei seitliche Streifen statt Vollbox
+    for (const sx of [-1, 1]) {
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.16, 11.98), this.accentMat);
+      stripe.position.set(sx * (HALF_W - 0.005), GROUND_Y + 1.18, 0);
+      this.group.add(stripe);
+    }
 
     // Dachsegment
     const roofBand = new THREE.Mesh(
@@ -165,10 +177,10 @@ export class BusModel {
     }
 
     const backCap = new THREE.Mesh(
-      new RoundedBoxGeometry(HALF_W * 2, hullH, 0.7, 3, 0.14),
+      new RoundedBoxGeometry(HALF_W * 2, hullH, 0.45, 3, 0.14),
       this.paintMat
     );
-    backCap.position.set(0, hullCY, BACK_Z - 0.34);
+    backCap.position.set(0, hullCY, BACK_Z - 0.22);
     this.group.add(backCap);
 
     // Schürze
@@ -247,7 +259,7 @@ export class BusModel {
       const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.78, 0.015), this.rubberMat);
       blade.position.set(0.04, 0.62, 0);
       pivot.add(arm, blade);
-      pivot.rotation.z = -0.25;
+      pivot.rotation.z = -1.2; // Parkstellung: liegend am Scheibenfuß
       this.group.add(pivot);
       this.wiperPivots.push(pivot);
     }
@@ -503,7 +515,7 @@ export class BusModel {
       // [z, links2er, rechts2er]
       [-3.3, true, false], [-2.4, true, false],
       [1.2, true, true], [2.0, true, true], [2.8, true, true],
-      [3.7, true, false], [4.6, true, true], [5.4, true, true],
+      [3.7, true, false], [4.5, true, true], [5.25, true, true],
     ];
     for (const [z, left, right] of rows) {
       if (left) {
@@ -637,10 +649,10 @@ export class BusModel {
       g.rotateX(-w.spinAngle);
     });
 
-    // Wischer
+    // Wischer: Parkstellung liegend (-1.2), Bogen ~100°
     const sweep = bus.wipers.sweep;
     for (const p of this.wiperPivots) {
-      p.rotation.z = -0.25 + sweep * 1.75;
+      p.rotation.z = -1.2 + sweep * 1.75;
     }
 
     // Lichter

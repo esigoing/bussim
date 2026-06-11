@@ -185,7 +185,7 @@ export class BusRoute {
       g.add(sign);
 
       g.position.copy(stop.shelterPos);
-      g.position.y = 0.13;
+      g.position.y = stop.pos.y + 0.13; // Gehwegniveau am Hang
       g.rotation.y = yaw;
       g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
       this.group.add(g);

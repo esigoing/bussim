@@ -15,7 +15,9 @@ import { Events } from '../core/Events.js';
 const FLOOR_Y = -0.86;
 const CAB_FLOOR = FLOOR_Y + 0.24;
 
-export const DRIVER_EYE = new THREE.Vector3(-0.62, 0.66, -4.92);
+// Augpunkt: ~2,0 m über Straße (Citywide-Fahrer sitzt hoch), gut 0,9 m
+// hinter dem Armaturenbrett — sonst klebt man an der Scheibe.
+export const DRIVER_EYE = new THREE.Vector3(-0.62, 0.82, -4.5);
 
 export class Cockpit {
   constructor(bus, busModel) {
@@ -24,11 +26,11 @@ export class Cockpit {
     this.buttons = new CockpitButtons();
 
     const dashMat = busModel.dashMat;
-    const darkMat = new THREE.MeshStandardMaterial({ color: 0x1d1f22, roughness: 0.55 });
+    const darkMat = new THREE.MeshStandardMaterial({ color: 0x1d1f22, roughness: 0.55, envMapIntensity: 0.15 });
 
     // ---------- Podest & Konsole
-    const podest = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.24, 1.6), darkMat);
-    podest.position.set(-0.6, FLOOR_Y + 0.12, -4.95);
+    const podest = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.24, 1.9), darkMat);
+    podest.position.set(-0.6, FLOOR_Y + 0.12, -4.8);
     this.group.add(podest);
 
     // Konsolenkörper (umgreift den Fahrer leicht)
@@ -42,42 +44,44 @@ export class Cockpit {
 
     // ---------- Kombiinstrument
     this.binnacle = new THREE.Group();
-    this.binnacle.position.set(-0.6, CAB_FLOOR + 0.98, -5.32);
+    this.binnacle.position.set(-0.6, CAB_FLOOR + 1.0, -5.32);
     this.binnacle.rotation.x = -0.32;
-    const panel = new THREE.Mesh(new RoundedBoxGeometry(0.58, 0.26, 0.05, 2, 0.02), darkMat);
+    const panel = new THREE.Mesh(new RoundedBoxGeometry(0.64, 0.32, 0.05, 2, 0.02), darkMat);
     this.binnacle.add(panel);
     this.group.add(this.binnacle);
 
+    // Layout: Tacho mittig oben, kleine Instrumente flankierend,
+    // ICU unten Mitte — nichts überlappt.
     this.gSpeed = new Gauge({ radius: 0.085, min: 0, max: 125, step: 25, label: 'km/h', lambda: 10 });
-    this.gSpeed.group.position.set(0, 0.01, 0.028);
+    this.gSpeed.group.position.set(0, 0.055, 0.028);
     this.binnacle.add(this.gSpeed.group);
 
     this.gFuel = new Gauge({ radius: 0.042, min: 0, max: 1, step: 1, label: 'Tank', redFrom: 0, redTo: 0.1, lambda: 2 });
-    this.gFuel.group.position.set(-0.21, 0.03, 0.028);
+    this.gFuel.group.position.set(-0.245, 0.06, 0.028);
     this.binnacle.add(this.gFuel.group);
 
     this.gTemp = new Gauge({ radius: 0.042, min: 40, max: 120, step: 40, label: '°C', redFrom: 105, redTo: 120, lambda: 2 });
-    this.gTemp.group.position.set(-0.115, -0.045, 0.028);
+    this.gTemp.group.position.set(-0.15, -0.085, 0.028);
     this.binnacle.add(this.gTemp.group);
 
     this.gAir1 = new Gauge({ radius: 0.042, min: 0, max: 12, step: 4, label: 'bar 1', redFrom: 0, redTo: 5.5, lambda: 4 });
-    this.gAir1.group.position.set(0.21, 0.03, 0.028);
+    this.gAir1.group.position.set(0.245, 0.06, 0.028);
     this.binnacle.add(this.gAir1.group);
 
     this.gAir2 = new Gauge({ radius: 0.042, min: 0, max: 12, step: 4, label: 'bar 2', redFrom: 0, redTo: 5.5, lambda: 4 });
-    this.gAir2.group.position.set(0.115, -0.045, 0.028);
+    this.gAir2.group.position.set(0.15, -0.085, 0.028);
     this.binnacle.add(this.gAir2.group);
 
     this.gauges = [this.gSpeed, this.gFuel, this.gTemp, this.gAir1, this.gAir2];
 
-    // ICU-Display unter dem Tacho
+    // ICU-Display unter dem Tacho (frei stehend, kein Überlapp)
     this.icu = new ICUDisplay();
-    this.icu.mesh.position.set(0, -0.09, 0.028);
+    this.icu.mesh.position.set(0, -0.1, 0.028);
     this.binnacle.add(this.icu.mesh);
 
     // ---------- Lenksäule
     this.column = new SteeringColumn(dashMat);
-    this.column.group.position.set(-0.6, CAB_FLOOR + 0.78, -5.05);
+    this.column.group.position.set(-0.6, CAB_FLOOR + 0.92, -4.98);
     this.group.add(this.column.group);
 
     // Blinkerhebel-Klickzonen (über/unter dem Hebel)
@@ -257,7 +261,7 @@ export class Cockpit {
     const headrest = new THREE.Mesh(new RoundedBoxGeometry(0.3, 0.18, 0.1, 2, 0.03), seatMat);
     headrest.position.set(0, 1.06, 0.3);
     seat.add(base, squab, back, headrest);
-    seat.position.set(-0.62, CAB_FLOOR, -4.78);
+    seat.position.set(-0.62, CAB_FLOOR, -4.6);
     this.group.add(seat);
   }
 

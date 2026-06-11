@@ -1,7 +1,9 @@
-// Straßennetz: achsenparalleles, perturbiertes Raster. Erzeugt
-// (a) Render-Meshes — Fahrbahnen mit eingemalten Markierungen, Kreuzungs-
-//     Patches, Gehweg-Ringe pro Block — und
-// (b) den Fahrspur-Graphen inkl. Abbiegekanten und Ampel-Referenzen.
+// Straßennetz v2: Nord-Süd-Straßen schlängeln sich als sanfte Kurven
+// (centerX(i, z) = Grundlinie + Sinus-Auslenkung), Ost-West-Straßen bleiben
+// gerade, folgen aber dem Hügel-Höhenfeld. Erzeugt
+// (a) Render-Meshes — Kurven-Strips mit eingemalten Markierungen,
+//     Kreuzungs-Patches, Gehweg-Strips — und
+// (b) den Fahrspur-Graphen (Polyline-Kanten inkl. Höhe) mit Abbiegern/Ampeln.
 
 import * as THREE from 'three';
 import * as Mat from '../graphics/materials/MatLib.js';
@@ -10,6 +12,8 @@ import { LaneGraph } from '../traffic/LaneGraph.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const KMH = 1 / 3.6;
+const CURB_H = 0.13;
+const SIDEWALK_W = 2.5;
 
 // Markierungen in eine Kopie der Asphalt-Albedo malen.
 // Textur deckt die volle Straßenbreite (u) und 12 m Länge (v) ab.
@@ -23,16 +27,12 @@ function roadTexture(seed, lanesPerDir) {
   const lineW = W * 0.012;
 
   if (lanesPerDir === 1) {
-    // Mittellinie gestrichelt (6 m Strich, 6 m Lücke auf 12 m Kachel)
-    ctx.fillRect(W / 2 - lineW / 2, 0, lineW, H / 2);
-    // Randlinien durchgezogen
-    ctx.fillRect(W * 0.045, 0, lineW, H);
+    ctx.fillRect(W / 2 - lineW / 2, 0, lineW, H / 2);   // Mittellinie gestrichelt
+    ctx.fillRect(W * 0.045, 0, lineW, H);               // Randlinien
     ctx.fillRect(W * 0.955 - lineW, 0, lineW, H);
   } else {
-    // Doppelte Mittellinie
-    ctx.fillRect(W / 2 - lineW * 1.6, 0, lineW, H);
+    ctx.fillRect(W / 2 - lineW * 1.6, 0, lineW, H);     // Doppellinie
     ctx.fillRect(W / 2 + lineW * 0.6, 0, lineW, H);
-    // Fahrstreifen-Trenner gestrichelt bei 1/4 und 3/4
     ctx.fillRect(W * 0.25 - lineW / 2, 0, lineW, H / 2);
     ctx.fillRect(W * 0.75 - lineW / 2, 0, lineW, H / 2);
     ctx.fillRect(W * 0.03, 0, lineW, H);
@@ -42,15 +42,75 @@ function roadTexture(seed, lanesPerDir) {
   return texSet;
 }
 
+const _tan = new THREE.Vector3();
+
+// Quad-Strip entlang einer Mittellinien-Polyline (Punkte inkl. Höhe).
+function stripGeometry(points, halfWidth, vScale = 1 / 12, yLift = 0) {
+  const n = points.length;
+  const pos = new Float32Array(n * 2 * 3);
+  const uv = new Float32Array(n * 2 * 2);
+  const idx = [];
+  let cum = 0;
+  for (let k = 0; k < n; k++) {
+    const p = points[k];
+    const pPrev = points[Math.max(0, k - 1)];
+    const pNext = points[Math.min(n - 1, k + 1)];
+    _tan.subVectors(pNext, pPrev);
+    _tan.y = 0;
+    _tan.normalize();
+    const latX = _tan.z, latZ = -_tan.x; // rechts der Laufrichtung
+    if (k > 0) cum += p.distanceTo(points[k - 1]);
+    const o = k * 6;
+    pos[o] = p.x - latX * halfWidth; pos[o + 1] = p.y + yLift; pos[o + 2] = p.z - latZ * halfWidth;
+    pos[o + 3] = p.x + latX * halfWidth; pos[o + 4] = p.y + yLift; pos[o + 5] = p.z + latZ * halfWidth;
+    const uo = k * 4;
+    uv[uo] = 0; uv[uo + 1] = cum * vScale;
+    uv[uo + 2] = 1; uv[uo + 3] = cum * vScale;
+    if (k > 0) {
+      const a = (k - 1) * 2, b = k * 2;
+      idx.push(a, b, a + 1, a + 1, b, b + 1);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+// Polyline seitlich versetzen (für Fahrspuren): offset > 0 = rechts der Laufrichtung
+function offsetPolyline(points, offset) {
+  const out = [];
+  const n = points.length;
+  for (let k = 0; k < n; k++) {
+    const pPrev = points[Math.max(0, k - 1)];
+    const pNext = points[Math.min(n - 1, k + 1)];
+    _tan.subVectors(pNext, pPrev);
+    _tan.y = 0;
+    _tan.normalize();
+    out.push(new THREE.Vector3(
+      points[k].x + _tan.z * offset,
+      points[k].y,
+      points[k].z - _tan.x * offset
+    ));
+  }
+  return out;
+}
+
 export class RoadNetwork {
-  constructor({ xs, zs, halfX, halfZ, segNS, segEW, signalized, seed, trafficLights }) {
+  constructor({ xs, zs, halfX, halfZ, amps, phases, freqs, segNS, segEW, signalized, seed, trafficLights, terrain }) {
     this.xs = xs;
     this.zs = zs;
-    this.halfX = halfX;   // Halbbreite je NS-Straße (Index i)
-    this.halfZ = halfZ;   // Halbbreite je EW-Straße (Index j)
-    this.segNS = segNS;   // segNS[i][j] = Segment existiert (zwischen zs[j] und zs[j+1])
+    this.halfX = halfX;
+    this.halfZ = halfZ;
+    this.amps = amps;       // Schlängel-Amplitude je NS-Straße
+    this.phases = phases;
+    this.freqs = freqs;
+    this.segNS = segNS;     // segNS[i][j] = Segment existiert (zs[j]..zs[j+1])
     this.segEW = segEW;
-    this.signalized = signalized; // Set "i,j"
+    this.signalized = signalized;
+    this.terrain = terrain;
     this.group = new THREE.Group();
     this.graph = new LaneGraph();
     this.trafficLights = trafficLights;
@@ -65,80 +125,40 @@ export class RoadNetwork {
     this.sidewalkMat = Mat.std({ ...sideTex, color: 0xffffff }, { wet: true });
 
     this._buildRoadMeshes();
-    this._buildSidewalks();
     this._buildLaneGraph();
+  }
+
+  // Mittellinien-X der NS-Straße i auf Höhe z (die Kurve!)
+  centerX(i, z) {
+    return this.xs[i] + this.amps[i] * Math.sin(z * this.freqs[i] + this.phases[i]);
   }
 
   isAvenueX(i) { return this.halfX[i] > 5; }
   isAvenueZ(j) { return this.halfZ[j] > 5; }
-
-  // Fahrbahn-Halbbreite + Bordsteinkante → Kreuzungs-Halbausdehnung
   boundX(i) { return this.halfX[i] + 0.8; }
   boundZ(j) { return this.halfZ[j] + 0.8; }
 
-  _roadStrip(width, length, texSet, mat) {
-    const geo = new THREE.PlaneGeometry(width, length, 1, Math.max(1, Math.round(length / 50)));
-    geo.rotateX(-Math.PI / 2);
-    // v entlang der Länge: 12-m-Kacheln
-    const uv = geo.attributes.uv;
-    for (let k = 0; k < uv.count; k++) {
-      uv.setY(k, uv.getY(k) * (length / 12));
+  // Mittellinien-Polyline eines NS-Segments (zA..zB), Schritt ~8 m, mit Höhe
+  _nsCenterline(i, zA, zB, lift = 0.01) {
+    const pts = [];
+    const steps = Math.max(2, Math.ceil((zB - zA) / 8));
+    for (let s = 0; s <= steps; s++) {
+      const z = zA + ((zB - zA) * s) / steps;
+      const x = this.centerX(i, z);
+      pts.push(new THREE.Vector3(x, this.terrain.hExact(x, z) + lift, z));
     }
-    return new THREE.Mesh(geo, mat);
+    return pts;
   }
 
-  _buildRoadMeshes() {
-    // NS-Straßen (entlang z)
-    for (let i = 0; i < this.xs.length; i++) {
-      const runs = this._contiguousRuns(this.segNS[i]);
-      for (const [j0, j1] of runs) {
-        const z0 = this.zs[j0] - this.boundZ(j0);
-        const z1 = this.zs[j1 + 1] + this.boundZ(j1 + 1);
-        const mesh = this._roadStrip(this.halfX[i] * 2, z1 - z0,
-          this.isAvenueX(i) ? this.avenueTex : this.streetTex,
-          this.isAvenueX(i) ? this.avenueMat : this.streetMat);
-        mesh.position.set(this.xs[i], 0.005, (z0 + z1) / 2);
-        mesh.receiveShadow = true;
-        this.group.add(mesh);
-      }
+  // Gerade EW-Polyline (xA..xB bei z), mit Höhenprofil
+  _ewCenterline(xA, xB, z, lift = 0.01) {
+    const pts = [];
+    const steps = Math.max(2, Math.ceil((xB - xA) / 8));
+    for (let s = 0; s <= steps; s++) {
+      const x = xA + ((xB - xA) * s) / steps;
+      pts.push(new THREE.Vector3(x, this.terrain.hExact(x, z) + lift, z));
     }
-    // EW-Straßen (entlang x) — Textur ist längs orientiert → um 90° drehen
-    for (let j = 0; j < this.zs.length; j++) {
-      const runs = this._contiguousRuns(this.segEW[j]);
-      for (const [i0, i1] of runs) {
-        const x0 = this.xs[i0] - this.boundX(i0);
-        const x1 = this.xs[i1 + 1] + this.boundX(i1 + 1);
-        const mesh = this._roadStrip(this.halfZ[j] * 2, x1 - x0,
-          this.isAvenueZ(j) ? this.avenueTex : this.streetTex,
-          this.isAvenueZ(j) ? this.avenueMat : this.streetMat);
-        mesh.rotation.y = Math.PI / 2;
-        mesh.position.set((x0 + x1) / 2, 0.003, this.zs[j]);
-        mesh.receiveShadow = true;
-        this.group.add(mesh);
-      }
-    }
-
-    // Kreuzungs-Patches (markierungsfrei, überdecken die Überlappung)
-    const patches = [];
-    for (let i = 0; i < this.xs.length; i++) {
-      for (let j = 0; j < this.zs.length; j++) {
-        if (!this._intersectionExists(i, j)) continue;
-        const g = new THREE.PlaneGeometry(this.halfX[i] * 2 + 0.4, this.halfZ[j] * 2 + 0.4);
-        g.rotateX(-Math.PI / 2);
-        const uv = g.attributes.uv;
-        for (let k = 0; k < uv.count; k++) {
-          uv.setX(k, uv.getX(k) * (this.halfX[i] / 6));
-          uv.setY(k, uv.getY(k) * (this.halfZ[j] / 6));
-        }
-        g.translate(this.xs[i], 0.012, this.zs[j]);
-        patches.push(g);
-      }
-    }
-    if (patches.length) {
-      const patchMesh = new THREE.Mesh(mergeGeometries(patches), this.plainMat);
-      patchMesh.receiveShadow = true;
-      this.group.add(patchMesh);
-    }
+    return pts;
   }
 
   _contiguousRuns(segArr) {
@@ -161,43 +181,85 @@ export class RoadNetwork {
     return ns && ew;
   }
 
-  _buildSidewalks() {
-    // Pro Block ein Gehweg-Ring (4 Boxen) + Eck-Quadrate an den Kreuzungen
-    const geos = [];
-    const SW = 2.5, CURB_H = 0.13;
-    const addBox = (x0, z0, x1, z1) => {
-      if (x1 - x0 < 0.1 || z1 - z0 < 0.1) return;
-      const g = new THREE.BoxGeometry(x1 - x0, CURB_H, z1 - z0);
-      // UV grob nach Weltgröße
-      g.translate((x0 + x1) / 2, CURB_H / 2, (z0 + z1) / 2);
-      geos.push(g);
-    };
+  _buildRoadMeshes() {
+    const sidewalkGeos = [];
 
-    for (let i = 0; i < this.xs.length - 1; i++) {
-      for (let j = 0; j < this.zs.length - 1; j++) {
-        // Blockgrenzen (Fahrbahnkanten)
-        const x0 = this.xs[i] + this.halfX[i];
-        const x1 = this.xs[i + 1] - this.halfX[i + 1];
-        const z0 = this.zs[j] + this.halfZ[j];
-        const z1 = this.zs[j + 1] - this.halfZ[j + 1];
-        // Ring
-        addBox(x0, z0, x1, z0 + SW);            // Süd
-        addBox(x0, z1 - SW, x1, z1);            // Nord
-        addBox(x0, z0 + SW, x0 + SW, z1 - SW);  // West
-        addBox(x1 - SW, z0 + SW, x1, z1 - SW);  // Ost
+    // ---- NS-Straßen: Kurven-Strips (zusammenhängende Läufe inkl. Kreuzungen)
+    for (let i = 0; i < this.xs.length; i++) {
+      for (const [j0, j1] of this._contiguousRuns(this.segNS[i])) {
+        const z0 = this.zs[j0] - this.boundZ(j0);
+        const z1 = this.zs[j1 + 1] + this.boundZ(j1 + 1);
+        const center = this._nsCenterline(i, z0, z1, 0.012);
+        const mesh = new THREE.Mesh(
+          stripGeometry(center, this.halfX[i]),
+          this.isAvenueX(i) ? this.avenueMat : this.streetMat
+        );
+        mesh.receiveShadow = true;
+        this.group.add(mesh);
+
+        // Gehwege beidseitig entlang der Kurve
+        for (const side of [-1, 1]) {
+          const off = side * (this.halfX[i] + SIDEWALK_W / 2);
+          const walkway = offsetPolyline(center, off);
+          sidewalkGeos.push(stripGeometry(walkway, SIDEWALK_W / 2, 1 / 2.5, CURB_H));
+        }
       }
     }
-    const merged = mergeGeometries(geos);
-    // Welt-UVs: nutze Positions-XZ als UV (Kacheln à 2,5 m)
-    const pos = merged.attributes.position;
-    const uv = merged.attributes.uv;
-    for (let k = 0; k < pos.count; k++) {
-      uv.setXY(k, pos.getX(k) / 2.5, pos.getZ(k) / 2.5);
+
+    // ---- EW-Straßen: gerade Strips zwischen den (verschobenen) Kreuzungen
+    for (let j = 0; j < this.zs.length; j++) {
+      for (const [i0, i1] of this._contiguousRuns(this.segEW[j])) {
+        const xA = this.centerX(i0, this.zs[j]) - this.boundX(i0);
+        const xB = this.centerX(i1 + 1, this.zs[j]) + this.boundX(i1 + 1);
+        if (xB <= xA) continue;
+        const center = this._ewCenterline(xA, xB, this.zs[j], 0.008);
+        const mesh = new THREE.Mesh(
+          stripGeometry(center, this.halfZ[j]),
+          this.isAvenueZ(j) ? this.avenueMat : this.streetMat
+        );
+        mesh.receiveShadow = true;
+        this.group.add(mesh);
+
+        for (const side of [-1, 1]) {
+          const off = side * (this.halfZ[j] + SIDEWALK_W / 2);
+          const walkway = offsetPolyline(center, off);
+          sidewalkGeos.push(stripGeometry(walkway, SIDEWALK_W / 2, 1 / 2.5, CURB_H));
+        }
+      }
     }
-    const mesh = new THREE.Mesh(merged, this.sidewalkMat);
-    mesh.receiveShadow = true;
-    mesh.castShadow = false;
-    this.group.add(mesh);
+
+    // ---- Kreuzungs-Patches (markierungsfrei, leicht erhöht gegen Z-Fighting)
+    const patches = [];
+    for (let i = 0; i < this.xs.length; i++) {
+      for (let j = 0; j < this.zs.length; j++) {
+        if (!this._intersectionExists(i, j)) continue;
+        const cx = this.centerX(i, this.zs[j]);
+        const cz = this.zs[j];
+        const w = this.halfX[i] * 2 + 1.2, d = this.halfZ[j] * 2 + 1.2;
+        const g = new THREE.PlaneGeometry(w, d, 2, 2);
+        g.rotateX(-Math.PI / 2);
+        const uvA = g.attributes.uv;
+        for (let k = 0; k < uvA.count; k++) {
+          uvA.setXY(k, uvA.getX(k) * (w / 12), uvA.getY(k) * (d / 12));
+        }
+        const posA = g.attributes.position;
+        for (let k = 0; k < posA.count; k++) {
+          const px = posA.getX(k) + cx, pz = posA.getZ(k) + cz;
+          posA.setXYZ(k, px, this.terrain.hExact(px, pz) + 0.018, pz);
+        }
+        g.computeVertexNormals();
+        patches.push(g);
+      }
+    }
+    if (patches.length) {
+      const patchMesh = new THREE.Mesh(mergeGeometries(patches), this.plainMat);
+      patchMesh.receiveShadow = true;
+      this.group.add(patchMesh);
+    }
+
+    const sidewalks = new THREE.Mesh(mergeGeometries(sidewalkGeos), this.sidewalkMat);
+    sidewalks.receiveShadow = true;
+    this.group.add(sidewalks);
   }
 
   _laneOffsets(isAvenue) {
@@ -206,8 +268,6 @@ export class RoadNetwork {
 
   _buildLaneGraph() {
     const g = this.graph;
-    // Kanten-Verzeichnis zum Verknüpfen:
-    // inbound[i][j] / outbound[i][j] = Listen {edge, axis, dir, laneIdx, end/startPoint, dirVec}
     const inbound = {}, outbound = {};
     const key = (i, j) => `${i},${j}`;
     const push = (map, i, j, entry) => {
@@ -218,64 +278,81 @@ export class RoadNetwork {
     // Registry für BusRoute: "NS,i,segJ,dir,laneIdx" → Kante
     this.laneIndex = new Map();
 
-    const speedStreet = 50 * KMH, speedAvenue = 50 * KMH;
+    const speed = 50 * KMH;
+    const addPolyLane = (pts, sp) => {
+      const e = g.addLane(pts[0], pts[pts.length - 1], sp);
+      // addLane erzeugt 2-Punkt-Kurve — ersetze durch volle Polyline
+      e.curve = new (e.curve.constructor)(pts);
+      e.length = e.curve.length;
+      // Bounding-Box neu
+      e.minX = Infinity; e.maxX = -Infinity; e.minZ = Infinity; e.maxZ = -Infinity;
+      for (const p of pts) {
+        e.minX = Math.min(e.minX, p.x); e.maxX = Math.max(e.maxX, p.x);
+        e.minZ = Math.min(e.minZ, p.z); e.maxZ = Math.max(e.maxZ, p.z);
+      }
+      return e;
+    };
+    const endDir = (pts, atEnd) => {
+      const a = atEnd ? pts[pts.length - 2] : pts[0];
+      const b = atEnd ? pts[pts.length - 1] : pts[1];
+      const v = new THREE.Vector3().subVectors(b, a);
+      v.y = 0;
+      return v.normalize();
+    };
 
-    // NS-Straßen
+    // ---- NS-Spuren (entlang der Kurve)
     for (let i = 0; i < this.xs.length; i++) {
       const offsets = this._laneOffsets(this.isAvenueX(i));
-      const speed = this.isAvenueX(i) ? speedAvenue : speedStreet;
       for (let j = 0; j < this.segNS[i].length; j++) {
         if (!this.segNS[i][j]) continue;
         const zA = this.zs[j] + this.boundZ(j);
         const zB = this.zs[j + 1] - this.boundZ(j + 1);
-        if (zB <= zA) continue;
+        if (zB <= zA + 4) continue;
+        const center = this._nsCenterline(i, zA, zB, 0.05);
         offsets.forEach((off, laneIdx) => {
-          // Richtung +z: rechts = -x
-          let e = g.addLane(
-            new THREE.Vector3(this.xs[i] - off, 0, zA),
-            new THREE.Vector3(this.xs[i] - off, 0, zB), speed);
+          // Richtung +z: rechts = -x ⇒ Offset -off relativ zur Laufrichtung +z
+          let pts = offsetPolyline(center, -off);
+          let e = addPolyLane(pts, speed);
           this.laneIndex.set(`NS,${i},${j},1,${laneIdx}`, e);
-          push(outbound, i, j, { edge: e, axis: 'NS', dir: +1, laneIdx, p: e.curve.points[0], v: new THREE.Vector3(0, 0, 1) });
-          push(inbound, i, j + 1, { edge: e, axis: 'NS', dir: +1, laneIdx, p: e.curve.points[1], v: new THREE.Vector3(0, 0, 1) });
-          // Richtung -z: rechts = +x
-          e = g.addLane(
-            new THREE.Vector3(this.xs[i] + off, 0, zB),
-            new THREE.Vector3(this.xs[i] + off, 0, zA), speed);
+          push(outbound, i, j, { edge: e, axis: 'NS', laneIdx, dir: 1, p: pts[0], v: endDir(pts, false) });
+          push(inbound, i, j + 1, { edge: e, axis: 'NS', laneIdx, dir: 1, p: pts[pts.length - 1], v: endDir(pts, true) });
+          // Richtung -z: gleiche Mittellinie, Offset +off, Punkte reversed
+          pts = offsetPolyline(center, off).reverse();
+          e = addPolyLane(pts, speed);
           this.laneIndex.set(`NS,${i},${j},-1,${laneIdx}`, e);
-          push(outbound, i, j + 1, { edge: e, axis: 'NS', dir: -1, laneIdx, p: e.curve.points[0], v: new THREE.Vector3(0, 0, -1) });
-          push(inbound, i, j, { edge: e, axis: 'NS', dir: -1, laneIdx, p: e.curve.points[1], v: new THREE.Vector3(0, 0, -1) });
-        });
-      }
-    }
-    // EW-Straßen
-    for (let j = 0; j < this.zs.length; j++) {
-      const offsets = this._laneOffsets(this.isAvenueZ(j));
-      const speed = this.isAvenueZ(j) ? speedAvenue : speedStreet;
-      for (let i = 0; i < this.segEW[j].length; i++) {
-        if (!this.segEW[j][i]) continue;
-        const xA = this.xs[i] + this.boundX(i);
-        const xB = this.xs[i + 1] - this.boundX(i + 1);
-        if (xB <= xA) continue;
-        offsets.forEach((off, laneIdx) => {
-          // Richtung +x: rechts = +z
-          let e = g.addLane(
-            new THREE.Vector3(xA, 0, this.zs[j] + off),
-            new THREE.Vector3(xB, 0, this.zs[j] + off), speed);
-          this.laneIndex.set(`EW,${j},${i},1,${laneIdx}`, e);
-          push(outbound, i, j, { edge: e, axis: 'EW', dir: +1, laneIdx, p: e.curve.points[0], v: new THREE.Vector3(1, 0, 0) });
-          push(inbound, i + 1, j, { edge: e, axis: 'EW', dir: +1, laneIdx, p: e.curve.points[1], v: new THREE.Vector3(1, 0, 0) });
-          // Richtung -x: rechts = -z
-          e = g.addLane(
-            new THREE.Vector3(xB, 0, this.zs[j] - off),
-            new THREE.Vector3(xA, 0, this.zs[j] - off), speed);
-          this.laneIndex.set(`EW,${j},${i},-1,${laneIdx}`, e);
-          push(outbound, i + 1, j, { edge: e, axis: 'EW', dir: -1, laneIdx, p: e.curve.points[0], v: new THREE.Vector3(-1, 0, 0) });
-          push(inbound, i, j, { edge: e, axis: 'EW', dir: -1, laneIdx, p: e.curve.points[1], v: new THREE.Vector3(-1, 0, 0) });
+          push(outbound, i, j + 1, { edge: e, axis: 'NS', laneIdx, dir: -1, p: pts[0], v: endDir(pts, false) });
+          push(inbound, i, j, { edge: e, axis: 'NS', laneIdx, dir: -1, p: pts[pts.length - 1], v: endDir(pts, true) });
         });
       }
     }
 
-    // Abbiegekanten + Ampeln pro Kreuzung
+    // ---- EW-Spuren (gerade, mit Höhenprofil)
+    for (let j = 0; j < this.zs.length; j++) {
+      const offsets = this._laneOffsets(this.isAvenueZ(j));
+      for (let i = 0; i < this.segEW[j].length; i++) {
+        if (!this.segEW[j][i]) continue;
+        const xA = this.centerX(i, this.zs[j]) + this.boundX(i);
+        const xB = this.centerX(i + 1, this.zs[j]) - this.boundX(i + 1);
+        if (xB <= xA + 4) continue;
+        const center = this._ewCenterline(xA, xB, this.zs[j], 0.05);
+        offsets.forEach((off, laneIdx) => {
+          // Richtung +x: rechts = +z
+          let pts = offsetPolyline(center, off);
+          let e = addPolyLane(pts, speed);
+          this.laneIndex.set(`EW,${j},${i},1,${laneIdx}`, e);
+          push(outbound, i, j, { edge: e, axis: 'EW', laneIdx, dir: 1, p: pts[0], v: endDir(pts, false) });
+          push(inbound, i + 1, j, { edge: e, axis: 'EW', laneIdx, dir: 1, p: pts[pts.length - 1], v: endDir(pts, true) });
+          // Richtung -x
+          pts = offsetPolyline(center, -off).reverse();
+          e = addPolyLane(pts, speed);
+          this.laneIndex.set(`EW,${j},${i},-1,${laneIdx}`, e);
+          push(outbound, i + 1, j, { edge: e, axis: 'EW', laneIdx, dir: -1, p: pts[0], v: endDir(pts, false) });
+          push(inbound, i, j, { edge: e, axis: 'EW', laneIdx, dir: -1, p: pts[pts.length - 1], v: endDir(pts, true) });
+        });
+      }
+    }
+
+    // ---- Kreuzungen: Verbinder + Abbieger + Ampeln
     this.intersections = [];
     for (let i = 0; i < this.xs.length; i++) {
       for (let j = 0; j < this.zs.length; j++) {
@@ -286,7 +363,7 @@ export class RoadNetwork {
         let ctrl = null;
         if (this.signalized.has(key(i, j)) && this.trafficLights) {
           ctrl = this.trafficLights.addIntersection(
-            new THREE.Vector3(this.xs[i], 0, this.zs[j]),
+            new THREE.Vector3(this.centerX(i, this.zs[j]), this.terrain.hExact(this.centerX(i, this.zs[j]), this.zs[j]), this.zs[j]),
             this.halfX[i], this.halfZ[j],
             (i * 7 + j * 13) % 20
           );
@@ -297,60 +374,49 @@ export class RoadNetwork {
           for (const oe of out) {
             const sameRoadSameDir = ie.axis === oe.axis && ie.dir === oe.dir;
             const opposite = ie.axis === oe.axis && ie.dir !== oe.dir;
-            if (opposite) continue; // kein U-Turn
+            if (opposite) continue;
             let weight;
             if (sameRoadSameDir) {
-              if (ie.laneIdx !== oe.laneIdx) continue; // Spur halten
+              if (ie.laneIdx !== oe.laneIdx) continue;
               weight = 3.0;
             } else {
-              // Abbiegen: Kreuzungsprodukt bestimmt links/rechts
               const cross = ie.v.x * oe.v.z - ie.v.z * oe.v.x;
               const isRight = cross < 0;
-              // Rechts nur von der rechten Spur, links nur von der linken
               const inLanes = this._laneOffsets(ie.axis === 'NS' ? this.isAvenueX(i) : this.isAvenueZ(j)).length;
               const outLanes = this._laneOffsets(oe.axis === 'NS' ? this.isAvenueX(i) : this.isAvenueZ(j)).length;
               if (isRight && (ie.laneIdx !== 0 || oe.laneIdx !== 0)) continue;
               if (!isRight && (ie.laneIdx !== inLanes - 1 || oe.laneIdx !== outLanes - 1)) continue;
               weight = isRight ? 1.0 : 0.8;
             }
-            if (sameRoadSameDir) {
-              // Durchfahrt: gerade Verbindungskante über die Kreuzung
-              const link = g.addTurn(ie.p, ie.v, oe.p, oe.v, 11);
-              ie.edge.addSuccessor(link, weight);
-              link.addSuccessor(oe.edge, 1);
-            } else {
-              const turn = g.addTurn(ie.p, ie.v, oe.p, oe.v, 5.5);
-              ie.edge.addSuccessor(turn, weight);
-              turn.addSuccessor(oe.edge, 1);
-            }
+            const link = this.graph.addTurn(ie.p, ie.v, oe.p, oe.v, sameRoadSameDir ? 11 : 5.5);
+            ie.edge.addSuccessor(link, weight);
+            link.addSuccessor(oe.edge, 1);
           }
         }
-        this.intersections.push({ i, j, x: this.xs[i], z: this.zs[j], signal: ctrl });
+        this.intersections.push({ i, j, x: this.centerX(i, this.zs[j]), z: this.zs[j], signal: ctrl });
       }
     }
 
     g.validate();
   }
 
-  // Bodenhöhe: Fahrbahn 0, sonst Gehweg-/Blockniveau
+  // Bodenhöhe: Fahrbahn = Terrain, Gehweg/Block = Terrain + Bordstein
   groundHeight(x, z) {
+    const h = this.terrain.h(x, z);
     for (let i = 0; i < this.xs.length; i++) {
-      if (Math.abs(x - this.xs[i]) <= this.halfX[i]) {
-        // existiert hier ein Segment?
+      if (Math.abs(x - this.centerX(i, z)) <= this.halfX[i]) {
         const j = this._segIndex(this.zs, z);
-        if (j >= 0 && this.segNS[i][j]) return 0;
-        // Im Kreuzungsbereich?
-        if (this._nearIntersection(x, z)) return 0;
+        if (j >= 0 && this.segNS[i][j]) return h;
       }
     }
     for (let j = 0; j < this.zs.length; j++) {
       if (Math.abs(z - this.zs[j]) <= this.halfZ[j]) {
         const i = this._segIndex(this.xs, x);
-        if (i >= 0 && this.segEW[j][i]) return 0;
-        if (this._nearIntersection(x, z)) return 0;
+        if (i >= 0 && this.segEW[j][i]) return h;
       }
     }
-    return 0.13;
+    if (this._nearIntersection(x, z)) return h;
+    return h + CURB_H;
   }
 
   _segIndex(arr, v) {
@@ -361,9 +427,13 @@ export class RoadNetwork {
   }
 
   _nearIntersection(x, z) {
-    const i = this._closestIndex(this.xs, x);
     const j = this._closestIndex(this.zs, z);
-    return Math.abs(x - this.xs[i]) <= this.boundX(i) && Math.abs(z - this.zs[j]) <= this.boundZ(j);
+    for (let i = 0; i < this.xs.length; i++) {
+      if (Math.abs(x - this.centerX(i, this.zs[j])) <= this.boundX(i) + 1 &&
+          Math.abs(z - this.zs[j]) <= this.boundZ(j) + 1 &&
+          this._intersectionExists(i, j)) return true;
+    }
+    return false;
   }
 
   _closestIndex(arr, v) {

@@ -28,7 +28,7 @@ const setup = await page.evaluate(() => {
   if (!stop) stop = g.city.route.stops[0];
   const yaw = Math.atan2(-stop.dir.x, -stop.dir.z);
   const b = g.bus.body;
-  b.position.set(stop.pos.x, 1.4, stop.pos.z);
+  b.position.set(stop.pos.x, stop.pos.y + 1.4, stop.pos.z);
   b.quaternion.set(0, Math.sin(yaw / 2), 0, Math.cos(yaw / 2));
   b.velocity.set(0, 0, 0);
   b.angularVelocity.set(0, 0, 0);

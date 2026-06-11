@@ -126,6 +126,7 @@ export class TrafficSystem {
     this._tan = new THREE.Vector3();
     this._m = new THREE.Matrix4();
     this._q = new THREE.Quaternion();
+    this._euler = new THREE.Euler();
     this._scale = new THREE.Vector3(1, 1, 1);
     this._up = new THREE.Vector3(0, 1, 0);
   }
@@ -154,7 +155,11 @@ export class TrafficSystem {
 
       car.edge.curve.sample(car.s, this._pos, this._tan);
       const yaw = Math.atan2(this._tan.x, this._tan.z);
-      this._q.setFromAxisAngle(this._up, yaw + Math.PI);
+      // Steigung: Nase folgt der Fahrbahn (sanfte Hügel)
+      const horiz = Math.hypot(this._tan.x, this._tan.z);
+      const pitch = Math.atan2(this._tan.y, Math.max(horiz, 1e-4));
+      this._euler.set(pitch, yaw + Math.PI, 0, 'YXZ');
+      this._q.setFromEuler(this._euler);
 
       this._m.compose(this._pos, this._q, this._scale);
       const t = this.types[car.typeIdx];

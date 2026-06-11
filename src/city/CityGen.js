@@ -1,9 +1,11 @@
-// Stadt-Orchestrierung: perturbiertes 9×9-Raster über ~1,1×1,1 km,
-// Zonierung (Zentrum/Mittel/Rand), Parks, gelöschte Nebenstraßen,
-// Straßennetz + Gebäude + Props + Natur + Ampeln + Buslinie.
+// Stadt-Orchestrierung: perturbiertes 9×9-Raster über ~1,1×1,1 km mit
+// geschwungenen NS-Straßen und Hügel-Höhenfeld. Zonierung, Parks (mit
+// Wegen/Teich), gelöschte Nebenstraßen, Straßennetz + Gebäude + Props +
+// Natur + Ampeln + Buslinie.
 
 import * as THREE from 'three';
 import * as Mat from '../graphics/materials/MatLib.js';
+import { Terrain } from './Terrain.js';
 import { RoadNetwork } from './RoadNetwork.js';
 import { Buildings } from './Buildings.js';
 import { Props } from './Props.js';
@@ -15,15 +17,33 @@ import { concreteTextures, grassTextures } from '../graphics/materials/TextureGe
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const N_LINES = 9;
-const AVENUE = 4;            // mittlere Linie = Allee
+const AVENUE = 4;
 const HALF_STREET = 3.5;
 const HALF_AVENUE = 6.75;
 const ROUTE_RECT = { i0: 2, j0: 2, i1: 6, j1: 6 };
+
+// Plane mit Vertex-Höhen aus dem Terrain (für Blockflächen am Hang)
+function terrainPlane(x0, z0, x1, z1, terrain, lift, uvScale) {
+  const w = x1 - x0, d = z1 - z0;
+  const g = new THREE.PlaneGeometry(w, d, Math.max(1, Math.round(w / 14)), Math.max(1, Math.round(d / 14)));
+  g.rotateX(-Math.PI / 2);
+  const pos = g.attributes.position;
+  const uv = g.attributes.uv;
+  const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+  for (let k = 0; k < pos.count; k++) {
+    const px = pos.getX(k) + cx, pz = pos.getZ(k) + cz;
+    pos.setXYZ(k, px, terrain.hExact(px, pz) + lift, pz);
+    uv.setXY(k, px * uvScale, pz * uvScale);
+  }
+  g.computeVertexNormals();
+  return g;
+}
 
 export class CityGen {
   constructor({ rand, collision }) {
     this.group = new THREE.Group();
     this.rand = rand;
+    this.terrain = new Terrain(rand.int(0, 99999));
 
     // --- Rasterlinien mit Jitter
     const span = 1100;
@@ -40,7 +60,17 @@ export class CityGen {
     const halfX = xs.map((_, i) => (i === AVENUE ? HALF_AVENUE : HALF_STREET));
     const halfZ = zs.map((_, j) => (j === AVENUE ? HALF_AVENUE : HALF_STREET));
 
-    // --- Segment-Existenz: ~10 % innere Nebenstraßen löschen
+    // --- Schlängelung der NS-Straßen: Ränder gerade, innen kurvig,
+    //     die Allee am stärksten. Wellenlänge 350–550 m.
+    const curveRand = rand.fork(99);
+    const amps = xs.map((_, i) => {
+      if (i === 0 || i === N_LINES - 1) return 0;
+      return i === AVENUE ? 20 : curveRand.float(7, 15);
+    });
+    const phases = xs.map(() => curveRand.float(0, Math.PI * 2));
+    const freqs = xs.map(() => (Math.PI * 2) / curveRand.float(350, 550));
+
+    // --- Segment-Existenz: einige innere Nebenstraßen löschen
     const segNS = xs.map(() => new Array(N_LINES - 1).fill(true));
     const segEW = zs.map(() => new Array(N_LINES - 1).fill(true));
     const onRoute = (axis, line, seg) => {
@@ -59,7 +89,7 @@ export class CityGen {
       else segEW[line][seg] = false;
     }
 
-    // --- Signalisierte Kreuzungen: alles, was die Allee kreuzt + Routen-Ecken
+    // --- Signalisierte Kreuzungen
     const signalized = new Set();
     for (let k = 0; k < N_LINES; k++) {
       signalized.add(`${AVENUE},${k}`);
@@ -70,26 +100,28 @@ export class CityGen {
     // --- Ampeln + Straßennetz
     this.trafficLights = new TrafficLights(this.group, Mat);
     this.roadNet = new RoadNetwork({
-      xs, zs, halfX, halfZ, segNS, segEW, signalized,
-      seed: rand.int(0, 99999), trafficLights: this.trafficLights,
+      xs, zs, halfX, halfZ, amps, phases, freqs, segNS, segEW, signalized,
+      seed: rand.int(0, 99999), trafficLights: this.trafficLights, terrain: this.terrain,
     });
     this.group.add(this.roadNet.group);
     this.trafficLights.build();
 
     // --- Blöcke + Zonen + Parks
+    // Blockgrenzen konservativ: maximale Kurven-Auslenkung der Nachbarstraßen
     this.blocks = [];
     const parkRand = rand.fork(44);
     const parkSet = new Set();
     while (parkSet.size < 5) {
       const i = parkRand.int(0, N_LINES - 2), j = parkRand.int(0, N_LINES - 2);
-      // Zentrum nicht zuparken
-      if (Math.abs(i - AVENUE) <= 0 && Math.abs(j - AVENUE) <= 0) continue;
+      if (i === AVENUE || j === AVENUE) continue;
       parkSet.add(`${i},${j}`);
     }
     for (let i = 0; i < N_LINES - 1; i++) {
       for (let j = 0; j < N_LINES - 1; j++) {
-        const x0 = xs[i] + halfX[i], x1 = xs[i + 1] - halfX[i + 1];
-        const z0 = zs[j] + halfZ[j], z1 = zs[j + 1] - halfZ[j + 1];
+        const x0 = xs[i] + amps[i] + halfX[i];
+        const x1 = xs[i + 1] - amps[i + 1] - halfX[i + 1];
+        const z0 = zs[j] + halfZ[j];
+        const z1 = zs[j + 1] - halfZ[j + 1];
         const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
         const d = Math.max(Math.abs(cx), Math.abs(cz));
         const zone = d < 200 ? 'center' : d < 380 ? 'mid' : 'outer';
@@ -97,44 +129,47 @@ export class CityGen {
       }
     }
 
-    // --- Grundflächen: Hof-Pflaster in Baublöcken
+    // --- Blockflächen: Hof-Pflaster, dem Terrain folgend
     const paveGeos = [];
     for (const b of this.blocks) {
       if (b.park) continue;
-      const g = new THREE.PlaneGeometry(b.x1 - b.x0 - 4.6, b.z1 - b.z0 - 4.6);
-      g.rotateX(-Math.PI / 2);
-      g.translate((b.x0 + b.x1) / 2, 0.132, (b.z0 + b.z1) / 2);
-      paveGeos.push(g);
+      if (b.x1 - b.x0 < 8 || b.z1 - b.z0 < 8) continue;
+      paveGeos.push(terrainPlane(b.x0 - 1, b.z0 - 1, b.x1 + 1, b.z1 + 1, this.terrain, 0.132, 1 / 2.5));
     }
     const paveTex = concreteTextures(512, 99);
-    paveTex.map.repeat.set(30, 30);
-    paveTex.normalMap.repeat.set(30, 30);
-    paveTex.roughnessMap.repeat.set(30, 30);
     const paveMat = Mat.std({ ...paveTex, color: 0xb9b6ae }, { wet: true });
     const pave = new THREE.Mesh(mergeGeometries(paveGeos), paveMat);
     pave.receiveShadow = true;
     this.group.add(pave);
 
-    // Außenring: Wiese bis zum Horizont
+    // --- Außenring: Wiese, am Stadtrand dem (auslaufenden) Terrain folgend
     const outerTex = grassTextures(512, 7);
-    outerTex.map.repeat.set(160, 160);
-    outerTex.normalMap.repeat.set(160, 160);
-    outerTex.roughnessMap.repeat.set(160, 160);
-    const outer = new THREE.Mesh(
-      new THREE.PlaneGeometry(4000, 4000),
-      Mat.std({ ...outerTex, color: 0xffffff }, { wet: true })
-    );
-    outer.rotation.x = -Math.PI / 2;
-    outer.position.y = -0.02;
+    const outerGeo = new THREE.PlaneGeometry(4000, 4000, 48, 48);
+    outerGeo.rotateX(-Math.PI / 2);
+    {
+      const pos = outerGeo.attributes.position;
+      const uv = outerGeo.attributes.uv;
+      for (let k = 0; k < pos.count; k++) {
+        const px = pos.getX(k), pz = pos.getZ(k);
+        pos.setY(k, this.terrain.hExact(px, pz) - 0.05);
+        uv.setXY(k, px / 6, pz / 6);
+      }
+      outerGeo.computeVertexNormals();
+    }
+    const outer = new THREE.Mesh(outerGeo, Mat.std({ ...outerTex, color: 0xffffff }, { wet: true }));
     outer.receiveShadow = true;
     this.group.add(outer);
 
-    // --- Gebäude / Props / Natur
-    this.buildings = new Buildings({ blocks: this.blocks, rand: rand.fork(55), collision, citySize: span });
+    // --- Gebäude / Props / Natur (alle Terrain-bewusst)
+    this.buildings = new Buildings({
+      blocks: this.blocks, rand: rand.fork(55), collision, terrain: this.terrain,
+    });
     this.group.add(this.buildings.group);
-    this.props = new Props({ roadNet: this.roadNet, rand: rand.fork(66) });
+    this.props = new Props({ roadNet: this.roadNet, rand: rand.fork(66), terrain: this.terrain });
     this.group.add(this.props.group);
-    this.nature = new Nature({ roadNet: this.roadNet, blocks: this.blocks, rand: rand.fork(77) });
+    this.nature = new Nature({
+      roadNet: this.roadNet, blocks: this.blocks, rand: rand.fork(77), terrain: this.terrain,
+    });
     this.group.add(this.nature.group);
 
     // --- Buslinie
@@ -142,16 +177,15 @@ export class CityGen {
 
     // --- Weltgrenzen
     const B = span / 2 + 60;
-    collision.addAABB(new StaticAABB(-B - 50, -B - 2000, -B, B + 2000));
-    collision.addAABB(new StaticAABB(B, -B - 2000, B + 50, B + 2000));
-    collision.addAABB(new StaticAABB(-B - 2000, -B - 50, B + 2000, -B));
-    collision.addAABB(new StaticAABB(-B - 2000, B, B + 2000, B + 50));
+    collision.addAABB(new StaticAABB(-B - 50, -B - 2000, -B, B + 2000, 60));
+    collision.addAABB(new StaticAABB(B, -B - 2000, B + 50, B + 2000, 60));
+    collision.addAABB(new StaticAABB(-B - 2000, -B - 50, B + 2000, -B, 60));
+    collision.addAABB(new StaticAABB(-B - 2000, B, B + 2000, B + 50, 60));
 
-    // --- Nachtlicht-Pool: 6 PointLights wandern zu den nächsten Laternen
+    // --- Nachtlicht-Pool
     this.lightPool = [];
     for (let k = 0; k < 6; k++) {
       const pl = new THREE.PointLight(0xffd9a0, 0, 26, 1.8);
-      pl.position.y = 6.0;
       this.group.add(pl);
       this.lightPool.push(pl);
     }
@@ -167,13 +201,11 @@ export class CityGen {
     this.buildings.update(env);
     this.props.update(env);
 
-    // Lichtpool nur nachts und nur alle 0,5 s neu sortieren
     this._poolTimer -= dt;
     if (this._poolTimer <= 0) {
       this._poolTimer = 0.5;
       if (env.night > 0.05) {
         const lamps = this.props.lampPositions;
-        // die 6 nächsten Laternen zum Bus
         const sorted = lamps
           .map((p) => ({ p, d: (p.x - busPos.x) ** 2 + (p.z - busPos.z) ** 2 }))
           .sort((a, b) => a.d - b.d)

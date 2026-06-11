@@ -214,7 +214,7 @@ export class WeatherFX {
       ctx.globalCompositeOperation = 'destination-out';
       ctx.lineCap = 'round';
       for (const p of this.wiperPivots) {
-        const angle = -0.25 + sweep * 1.75; // wie BusModel
+        const angle = -1.2 + sweep * 1.75; // wie BusModel
         const px = p.u * 512, py = 512 - p.v * 512;
         const len = p.len * 512;
         // Blattsegment außen am Arm

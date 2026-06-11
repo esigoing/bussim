@@ -20,13 +20,14 @@ const _world = new THREE.Vector3();
 const _door = new THREE.Vector3();
 
 export class PassengerSystem {
-  constructor({ scene, bus, busModel, route, ticketFlow, rand }) {
+  constructor({ scene, bus, busModel, route, ticketFlow, rand, groundY }) {
     this.scene = scene;
     this.bus = bus;
     this.busModel = busModel;
     this.route = route;
     this.ticketFlow = ticketFlow;
     this.rand = rand;
+    this.groundY = groundY || (() => 0.13); // Welt-Bodenhöhe (Terrain + Bordstein)
 
     this.waiting = route.stops.map(() => []);   // Passenger[] je Haltestelle
     this.aboard = [];
@@ -59,7 +60,7 @@ export class PassengerSystem {
     p.group.position.copy(stop.shelterPos);
     p.group.position.x += this.rand.float(-2.5, 2.5);
     p.group.position.z += this.rand.float(-2.5, 2.5);
-    p.group.position.y = 0.13;
+    p.group.position.y = this.groundY(p.group.position.x, p.group.position.z);
     p.group.rotation.y = this.rand.float(0, Math.PI * 2);
     this.scene.add(p.group);
     this.waiting[stopIdx].push(p);
@@ -138,7 +139,9 @@ export class PassengerSystem {
     if (cb) {
       if (cb.state === 'WALK_TO_DOOR') {
         busGroup.localToWorld(_door.copy(DOOR1_LOCAL));
-        _door.y = 0.13;
+        _door.y = cb.group.position.y;
+        // Füße folgen dem Gelände
+        cb.group.position.y = this.groundY(cb.group.position.x, cb.group.position.z);
         if (cb.moveToward(_door, dt)) {
           // Umhängen in Bus-Koordinaten
           this.scene.remove(cb.group);
@@ -232,13 +235,12 @@ export class PassengerSystem {
           busGroup.localToWorld(_world.copy(p.group.position));
           busGroup.remove(p.group);
           this.scene.add(p.group);
-          p.group.position.set(_world.x, 0.13, _world.z);
+          p.group.position.set(_world.x, this.groundY(_world.x, _world.z), _world.z);
           p.aboard = false;
           p.state = 'WALK_AWAY';
           // Ziel: quer weg vom Bus
-          const dir = new THREE.Vector3(this.rand.float(0.5, 1), 0, this.rand.float(-0.6, 0.6)).normalize();
-          busGroup.localToWorld(dir.set(dir.x * 40 + 3, 0, p.group.position.z));
-          p.target.set(_world.x + this.rand.float(10, 25), 0.13, _world.z + this.rand.float(-20, 20));
+          p.target.set(_world.x + this.rand.float(10, 25), 0, _world.z + this.rand.float(-20, 20));
+          p.target.y = this.groundY(p.target.x, p.target.z);
           this.aboard.splice(k, 1);
           this.leaving.push(p);
           this.bus.setPassengerCount(this.aboard.length);
@@ -247,13 +249,14 @@ export class PassengerSystem {
       p.update(this.time);
     }
 
-    // ---------- Aussteigende entfernen sich
+    // ---------- Aussteigende entfernen sich (Füße folgen dem Gelände)
     for (let k = this.leaving.length - 1; k >= 0; k--) {
       const p = this.leaving[k];
       if (p.moveToward(p.target, dt)) {
         this.scene.remove(p.group);
         this.leaving.splice(k, 1);
       } else {
+        p.group.position.y = this.groundY(p.group.position.x, p.group.position.z);
         p.update(this.time);
       }
     }

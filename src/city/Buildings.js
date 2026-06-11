@@ -181,13 +181,12 @@ function buildingWalls(x0, z0, x1, z1, height) {
 }
 
 export class Buildings {
-  constructor({ blocks, rand, collision, citySize }) {
+  constructor({ blocks, rand, collision, terrain }) {
     this.group = new THREE.Group();
     this.materials = [];
 
     const styleBuckets = STYLES.map(() => []);
     const roofGeos = [];
-    const baseY = 0.13;
 
     for (const block of blocks) {
       if (block.park) continue;
@@ -231,9 +230,12 @@ export class Buildings {
         if (zone === 'center') styleIdx = rand.chance(0.45) ? 5 : rand.int(2, 4);
         else styleIdx = rand.int(0, 4);
 
-        const walls = buildingWalls(qx0, qz0, qx1, qz1, height);
+        // Gebäude steht auf der Terrainhöhe seiner Mitte; die Wände reichen
+        // 3 m tiefer (Sockel), damit am Hang keine Lücken entstehen.
+        const baseY = terrain.hExact((qx0 + qx1) / 2, (qz0 + qz1) / 2) + 0.13;
+        const walls = buildingWalls(qx0, qz0, qx1, qz1, height + 3);
         for (const w of walls) {
-          w.translate(0, baseY, 0);
+          w.translate(0, baseY - 3, 0);
           styleBuckets[styleIdx].push(w);
         }
         const roof = new THREE.PlaneGeometry(qx1 - qx0, qz1 - qz0);
@@ -251,7 +253,7 @@ export class Buildings {
           roofGeos.push(box);
         }
 
-        collision.addAABB(new StaticAABB(qx0, qz0, qx1, qz1, height));
+        collision.addAABB(new StaticAABB(qx0, qz0, qx1, qz1, baseY + height));
       }
     }
 

@@ -25,24 +25,29 @@ export class Minimap {
     ctx.fillStyle = '#11151c';
     ctx.fillRect(0, 0, this.size, this.size);
 
-    // Straßen
+    // Straßen — NS-Straßen sind Kurven: in 20-m-Schritten abtasten
     ctx.strokeStyle = '#3b4250';
     const { xs, zs, halfX, halfZ, segNS, segEW } = roadNet;
     for (let i = 0; i < xs.length; i++) {
       for (let j = 0; j < segNS[i].length; j++) {
         if (!segNS[i][j]) continue;
         ctx.lineWidth = halfX[i] > 5 ? 4 : 2;
-        const [x0, y0] = this._w2m(xs[i], zs[j]);
-        const [x1, y1] = this._w2m(xs[i], zs[j + 1]);
-        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+        ctx.beginPath();
+        const z0 = zs[j], z1 = zs[j + 1];
+        for (let z = z0, first = true; z <= z1 + 1; z += 20, first = false) {
+          const zc = Math.min(z, z1);
+          const [mx, my] = this._w2m(roadNet.centerX(i, zc), zc);
+          if (first) ctx.moveTo(mx, my); else ctx.lineTo(mx, my);
+        }
+        ctx.stroke();
       }
     }
     for (let j = 0; j < zs.length; j++) {
       for (let i = 0; i < segEW[j].length; i++) {
         if (!segEW[j][i]) continue;
         ctx.lineWidth = halfZ[j] > 5 ? 4 : 2;
-        const [x0, y0] = this._w2m(xs[i], zs[j]);
-        const [x1, y1] = this._w2m(xs[i + 1], zs[j]);
+        const [x0, y0] = this._w2m(roadNet.centerX(i, zs[j]), zs[j]);
+        const [x1, y1] = this._w2m(roadNet.centerX(i + 1, zs[j]), zs[j]);
         ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
       }
     }
