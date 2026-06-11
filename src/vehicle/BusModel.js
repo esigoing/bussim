@@ -124,26 +124,46 @@ export class BusModel {
 
     // Rumpf unter den Fenstern: SEITENWÄNDE statt Vollkörper —
     // der Innenraum muss frei bleiben (Niederflur-Boden liegt bei FLOOR_Y).
+    // Rechts werden die drei Türöffnungen ausgespart.
     const lowerY = GROUND_Y + 0.32 + 1.05 / 2 - 0.02;
-    for (const sx of [-1, 1]) {
-      const side = new THREE.Mesh(
-        new RoundedBoxGeometry(0.07, 1.05, 12, 2, 0.03),
+    // Wandsegmente rechts: zwischen/neben den Türen (DOOR_RANGES)
+    const rightSegs = [];
+    {
+      let zCursor = -6;
+      for (const [d0, d1] of DOOR_RANGES) {
+        if (d0 - zCursor > 0.05) rightSegs.push([zCursor, d0]);
+        zCursor = d1;
+      }
+      if (6 - zCursor > 0.05) rightSegs.push([zCursor, 6]);
+    }
+    // linke Wand durchgehend
+    const wallL = new THREE.Mesh(new RoundedBoxGeometry(0.07, 1.05, 12, 2, 0.03), this.paintMat);
+    wallL.position.set(-(HALF_W - 0.035), lowerY, 0);
+    this.group.add(wallL);
+    // rechte Wand segmentiert
+    for (const [z0, z1] of rightSegs) {
+      const seg = new THREE.Mesh(
+        new RoundedBoxGeometry(0.07, 1.05, z1 - z0, 2, 0.03),
         this.paintMat
       );
-      side.position.set(sx * (HALF_W - 0.035), lowerY, 0);
-      this.group.add(side);
+      seg.position.set(HALF_W - 0.035, lowerY, (z0 + z1) / 2);
+      this.group.add(seg);
     }
     // Unterboden-Verkleidung (von außen sichtbarer dunkler Sockel)
     const belly = new THREE.Mesh(new THREE.BoxGeometry(HALF_W * 2 - 0.1, 0.3, 11.9), this.skirtMat);
     belly.position.set(0, FLOOR_Y - 0.2, 0);
     this.group.add(belly);
 
-    // Akzentstreifen: zwei seitliche Streifen statt Vollbox
-    for (const sx of [-1, 1]) {
-      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.16, 11.98), this.accentMat);
-      stripe.position.set(sx * (HALF_W - 0.005), GROUND_Y + 1.18, 0);
+    // Akzentstreifen: links durchgehend, rechts um die Türen herum
+    const stripeL = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.16, 11.98), this.accentMat);
+    stripeL.position.set(-(HALF_W - 0.005), GROUND_Y + 1.18, 0);
+    this.group.add(stripeL);
+    for (const [z0, z1] of rightSegs) {
+      const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.16, z1 - z0 - 0.02), this.accentMat);
+      stripe.position.set(HALF_W - 0.005, GROUND_Y + 1.18, (z0 + z1) / 2);
       this.group.add(stripe);
     }
+    this._rightWallSegs = rightSegs;
 
     // Dachsegment
     const roofBand = new THREE.Mesh(
@@ -439,11 +459,15 @@ export class BusModel {
     floor.position.set(0, FLOOR_Y - 0.03, 0);
     this.group.add(floor);
 
-    // Innenwände (leicht nach innen versetzte Schalen)
-    const wallGeo = new THREE.BoxGeometry(0.03, 1.0, 11.5);
-    for (const sx of [-1, 1]) {
-      const w = new THREE.Mesh(wallGeo, this.innerWallMat);
-      w.position.set(sx * (HALF_W - 0.07), FLOOR_Y + 0.5, 0.1);
+    // Innenwände (leicht nach innen versetzte Schalen) —
+    // rechts mit Türaussparungen wie die Außenwand
+    const wallL = new THREE.Mesh(new THREE.BoxGeometry(0.03, 1.0, 11.5), this.innerWallMat);
+    wallL.position.set(-(HALF_W - 0.07), FLOOR_Y + 0.5, 0.1);
+    wallL.castShadow = false;
+    this.group.add(wallL);
+    for (const [z0, z1] of this._rightWallSegs) {
+      const w = new THREE.Mesh(new THREE.BoxGeometry(0.03, 1.0, z1 - z0), this.innerWallMat);
+      w.position.set(HALF_W - 0.07, FLOOR_Y + 0.5, (z0 + z1) / 2);
       w.castShadow = false;
       this.group.add(w);
     }

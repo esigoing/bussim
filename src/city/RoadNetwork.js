@@ -79,7 +79,8 @@ function stripGeometry(points, halfWidth, vScale = 1 / 12, yLift = 0) {
   return geo;
 }
 
-// Polyline seitlich versetzen (für Fahrspuren): offset > 0 = rechts der Laufrichtung
+// Polyline seitlich versetzen (für Fahrspuren).
+// KONVENTION: offset > 0 = LINKS der Laufrichtung (lat = (tan.z, -tan.x)).
 function offsetPolyline(points, offset) {
   const out = [];
   const n = points.length;
@@ -336,14 +337,14 @@ export class RoadNetwork {
         if (xB <= xA + 4) continue;
         const center = this._ewCenterline(xA, xB, this.zs[j], 0.05);
         offsets.forEach((off, laneIdx) => {
-          // Richtung +x: rechts = +z
-          let pts = offsetPolyline(center, off);
+          // Richtung +x: rechts der Laufrichtung = -offset (Konvention oben)
+          let pts = offsetPolyline(center, -off);
           let e = addPolyLane(pts, speed);
           this.laneIndex.set(`EW,${j},${i},1,${laneIdx}`, e);
           push(outbound, i, j, { edge: e, axis: 'EW', laneIdx, dir: 1, p: pts[0], v: endDir(pts, false) });
           push(inbound, i + 1, j, { edge: e, axis: 'EW', laneIdx, dir: 1, p: pts[pts.length - 1], v: endDir(pts, true) });
-          // Richtung -x
-          pts = offsetPolyline(center, -off).reverse();
+          // Richtung -x: nach dem Reversen liegt +offset rechts
+          pts = offsetPolyline(center, off).reverse();
           e = addPolyLane(pts, speed);
           this.laneIndex.set(`EW,${j},${i},-1,${laneIdx}`, e);
           push(outbound, i + 1, j, { edge: e, axis: 'EW', laneIdx, dir: -1, p: pts[0], v: endDir(pts, false) });

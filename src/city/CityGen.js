@@ -142,16 +142,18 @@ export class CityGen {
     pave.receiveShadow = true;
     this.group.add(pave);
 
-    // --- Außenring: Wiese, am Stadtrand dem (auslaufenden) Terrain folgend
+    // --- Außenring: Wiese, dem Terrain folgend. WICHTIG: fein genug
+    // auflösen (20-m-Zellen) und absenken, sonst ragt die linear
+    // interpolierte Fläche an Hügeln über die exakt gesampelten Straßen.
     const outerTex = grassTextures(512, 7);
-    const outerGeo = new THREE.PlaneGeometry(4000, 4000, 48, 48);
+    const outerGeo = new THREE.PlaneGeometry(4000, 4000, 200, 200);
     outerGeo.rotateX(-Math.PI / 2);
     {
       const pos = outerGeo.attributes.position;
       const uv = outerGeo.attributes.uv;
       for (let k = 0; k < pos.count; k++) {
         const px = pos.getX(k), pz = pos.getZ(k);
-        pos.setY(k, this.terrain.hExact(px, pz) - 0.05);
+        pos.setY(k, this.terrain.hExact(px, pz) - 0.18);
         uv.setXY(k, px / 6, pz / 6);
       }
       outerGeo.computeVertexNormals();

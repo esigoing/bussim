@@ -7,21 +7,23 @@ import { damp } from '../utils/Math3D.js';
 export class SteeringColumn {
   constructor(dashMat) {
     this.group = new THREE.Group();
-    // Neigung: Busräder stehen flacher als PKW (~35° aus der Horizontalen)
-    this.tilt = -0.95;
+    // Neigung: Busräder stehen flacher als PKW (~35° aus der Horizontalen).
+    // Positiv = Säulenkopf neigt sich zum Fahrer (+z), Radfläche zeigt
+    // nach oben-hinten zum Fahrer.
+    this.tilt = 0.95;
 
     const rimMat = new THREE.MeshStandardMaterial({ color: 0x17181a, roughness: 0.45 });
     const columnMat = dashMat || new THREE.MeshStandardMaterial({ color: 0x222326, roughness: 0.6 });
 
-    // Säule
+    // Säule: Fuß vorn unten, Kopf hinten oben beim Fahrer
     const column = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.055, 0.45, 12), columnMat);
     column.rotation.x = this.tilt;
     column.position.set(0, -0.18, 0.14);
     this.group.add(column);
 
-    // Radgruppe (rotiert um lokale Z nach Tilt)
+    // Radgruppe: lokale +z-Normale zeigt zum Fahrer (oben-hinten)
     this.wheelGroup = new THREE.Group();
-    this.wheelGroup.rotation.x = this.tilt + Math.PI / 2;
+    this.wheelGroup.rotation.x = this.tilt - Math.PI / 2;
 
     const rim = new THREE.Mesh(new THREE.TorusGeometry(0.235, 0.022, 14, 40), rimMat);
     this.wheelGroup.add(rim);
