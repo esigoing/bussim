@@ -11,19 +11,20 @@ const CONFIGS = {
   left: {
     size: [0.2, 0.42],
     rtAspect: 0.55,
-    fov: 22,
-    // weniger nach außen gedreht: mehr eigene Fahrbahn/Busflanke im Bild,
-    // weniger Gehweg der Gegenseite (Spieltest-Feedback)
-    rotY: Math.PI - 0.14,
+    fov: 28, // etwas weitwinkliger (Spieltest-Feedback)
+    // deutlich zur Busflanke gedreht: der Bus ist am Bildrand sichtbar
+    // (Spieltest-Feedback: „mehr vom Bus zeigen")
+    rotY: Math.PI - 0.08,
     rotX: -0.03,
     planeRotY: -0.28,
   },
   right: {
     size: [0.2, 0.42],
     rtAspect: 0.55,
-    fov: 22,
-    // etwas weniger nach außen gedreht (Spieltest-Feedback)
-    rotY: Math.PI + 0.22,
+    fov: 28, // etwas weitwinkliger (Spieltest-Feedback)
+    // deutlich zur Busflanke gedreht: der Bus ist am Bildrand sichtbar
+    // (Spieltest-Feedback: „mehr vom Bus zeigen")
+    rotY: Math.PI + 0.14,
     rotX: -0.03,
     planeRotY: 0.28,
   },

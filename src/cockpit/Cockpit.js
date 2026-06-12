@@ -145,13 +145,15 @@ export class Cockpit {
     // Layout (Spieltest-Wunsch): ICU oben MITTIG — durch die obere
     // Radöffnung sichtbar, nicht hinter der Nabe —, Tacho links und
     // Drehzahlmesser rechts daneben, kleine Instrumente unten.
-    this.gSpeed = new Gauge({ radius: 0.085, min: 0, max: 125, step: 25, label: 'km/h', lambda: 10 });
-    this.gSpeed.group.position.set(-0.2, 0.045, 0.028);
+    // Tacho/DZM kleiner und dicht ans ICU gerückt — Innenkante 7,5 mm vor
+    // der Display-Kante (±0.0775), damit nichts ins Display clippt
+    this.gSpeed = new Gauge({ radius: 0.075, min: 0, max: 125, step: 25, label: 'km/h', lambda: 10 });
+    this.gSpeed.group.position.set(-0.16, 0.045, 0.028);
     this.binnacle.add(this.gSpeed.group);
 
     // Drehzahlmesser mit ×100-Skala (0–25 = 0–2500 U/min, rot ab 2200)
-    this.gRpm = new Gauge({ radius: 0.085, min: 0, max: 25, step: 5, label: 'U/min ×100', redFrom: 22, redTo: 25, lambda: 10 });
-    this.gRpm.group.position.set(0.2, 0.045, 0.028);
+    this.gRpm = new Gauge({ radius: 0.075, min: 0, max: 25, step: 5, label: 'U/min ×100', redFrom: 22, redTo: 25, lambda: 10 });
+    this.gRpm.group.position.set(0.16, 0.045, 0.028);
     this.binnacle.add(this.gRpm.group);
 
     this.gFuel = new Gauge({ radius: 0.042, min: 0, max: 1, step: 1, label: 'Tank', redFrom: 0, redTo: 0.1, lambda: 2 });
@@ -183,20 +185,34 @@ export class Cockpit {
     // ---------- Lenksäule (Kranz über dem tief liegenden Kombiinstrument:
     // Sichtlinie Auge → Panel-Oberkante läuft knapp über den Kranz)
     this.column = new SteeringColumn(dashMat);
-    this.column.group.position.set(-0.6, CAB_FLOOR + 0.95, -4.82);
+    this.column.group.position.set(-0.63, CAB_FLOOR + 0.99, -4.82);
     this.group.add(this.column.group);
+
+    // Klick aufs Lenkrad blendet es aus/ein (freie Sicht auf die
+    // Instrumente); die unsichtbare Zone bleibt klickbar zum Wiedereinblenden.
+    // Bewusst rechtslastig dimensioniert, damit die Blinkerhebel-Zonen
+    // links daneben frei bleiben.
+    this.buttons.createZone({
+      size: new THREE.Vector3(0.36, 0.28, 0.2),
+      position: new THREE.Vector3(-0.55, CAB_FLOOR + 0.99, -4.82),
+      parent: this.group,
+      name: 'wheelToggle',
+      action: () => {
+        this.column.wheelGroup.visible = !this.column.wheelGroup.visible;
+      },
+    });
 
     // Blinkerhebel-Klickzonen (über/unter dem Hebelknauf links der Säule)
     this.buttons.createZone({
       size: new THREE.Vector3(0.14, 0.08, 0.18),
-      position: new THREE.Vector3(-0.84, CAB_FLOOR + 0.88, -4.84),
+      position: new THREE.Vector3(-0.87, CAB_FLOOR + 0.92, -4.84),
       parent: this.group,
       name: 'stalkUp',
       action: () => this._stalk(1),
     });
     this.buttons.createZone({
       size: new THREE.Vector3(0.14, 0.08, 0.18),
-      position: new THREE.Vector3(-0.84, CAB_FLOOR + 0.72, -4.84),
+      position: new THREE.Vector3(-0.87, CAB_FLOOR + 0.76, -4.84),
       parent: this.group,
       name: 'stalkDown',
       action: () => this._stalk(-1),
@@ -204,7 +220,7 @@ export class Cockpit {
     // Hebelspitze drücken = Fernlicht (nur bei Abblendlicht wirksam)
     this.buttons.createZone({
       size: new THREE.Vector3(0.12, 0.08, 0.18),
-      position: new THREE.Vector3(-0.95, CAB_FLOOR + 0.8, -4.84),
+      position: new THREE.Vector3(-0.97, CAB_FLOOR + 0.84, -4.84),
       parent: this.group,
       name: 'stalkPush',
       action: () => this._stalkPush(),

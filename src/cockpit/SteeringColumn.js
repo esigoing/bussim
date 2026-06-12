@@ -15,17 +15,17 @@ export class SteeringColumn {
     const rimMat = new THREE.MeshStandardMaterial({ color: 0x17181a, roughness: 0.45 });
     const columnMat = dashMat || new THREE.MeshStandardMaterial({ color: 0x222326, roughness: 0.6 });
 
-    // Säule: steil vom Radnaben-Punkt (lokaler Ursprung) hinunter aufs
-    // Podest zwischen den Knien — wie beim echten Stadtbus steht das flache
-    // Rad auf einer deutlich steileren Säule. Rad darf nicht frei schweben.
+    // Säule: steil von der Radnabe hinunter aufs Podest zwischen den Knien.
+    // Die Spitze endet INNERHALB der Nabe (3 cm hinter deren Zentrum entlang
+    // der Radnormalen) — sonst stößt sie vorn durch die Nabenfront durch.
     const column = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.06, 1.0, 12), columnMat);
     column.rotation.x = 0.28;
-    column.position.set(0, -0.48, -0.135);
+    column.position.set(0, -0.5, -0.16);
     this.group.add(column);
     // Manschette am Säulenfuß kaschiert den Übergang ins Podest
     const boot = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.095, 0.16, 12), columnMat);
     boot.rotation.x = 0.28;
-    boot.position.set(0, -0.92, -0.25);
+    boot.position.set(0, -0.92, -0.28);
     this.group.add(boot);
 
     // Radgruppe: lokale +z-Normale zeigt zum Fahrer (oben-hinten)

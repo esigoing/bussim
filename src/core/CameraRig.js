@@ -57,7 +57,14 @@ export class CameraRig {
     this._applyZoom(1);
 
     if (this.mode === 'chase') {
-      busGroup.localToWorld(_pos.set(0, 4.6, 17));
+      // Umsehen + Zoomen auch außen: Rechtsklick-Drag orbitiert um den Bus
+      // (lookYaw) und hebt/senkt die Kamera (lookPitch), Mausrad ändert
+      // den Abstand. Mittelklick setzt beides zurück.
+      const dist = 17 / input.zoom;
+      const height = Math.max(1.8, (4.6 + input.lookPitch * 9) / input.zoom);
+      busGroup.localToWorld(_pos.set(
+        Math.sin(input.lookYaw) * dist, height, Math.cos(input.lookYaw) * dist
+      ));
       this._chasePos.x = damp(this._chasePos.x, _pos.x, 5, dt);
       this._chasePos.y = damp(this._chasePos.y, Math.max(_pos.y, 2), 5, dt);
       this._chasePos.z = damp(this._chasePos.z, _pos.z, 5, dt);
