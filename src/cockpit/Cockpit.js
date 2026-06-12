@@ -131,76 +131,80 @@ export class Cockpit {
     this.group.add(dashR);
 
     // ---------- Kombiinstrument
-    // Höher und flacher als die Konsole: der Blick vom Fahrerauge geht
-    // ÜBER den (kleineren) Lenkradkranz auf alle Instrumente — Scania-typisch.
+    // Tief in den Armaturenträger integriert (Referenz: echtes Scania-/
+    // The-Bus-Cockpit): der Blick geht DURCH die obere Lenkradöffnung auf
+    // die Instrumente, die Oberkante bleibt weit unter der Frontscheibe —
+    // freie Sicht auf die Straße ab ~4 m vor dem Bus.
     this.binnacle = new THREE.Group();
-    this.binnacle.position.set(-0.6, CAB_FLOOR + 1.12, -5.32);
-    this.binnacle.rotation.x = -0.18;
+    this.binnacle.position.set(-0.64, CAB_FLOOR + 0.86, -5.19);
+    this.binnacle.rotation.x = -0.3;
     const panel = new THREE.Mesh(new RoundedBoxGeometry(0.64, 0.32, 0.05, 2, 0.02), darkMat);
     this.binnacle.add(panel);
     this.group.add(this.binnacle);
-    // Stützfuß zwischen Konsolenoberkante und Kombiinstrument
-    const binnacleFoot = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.16, 0.1), darkMat);
-    binnacleFoot.position.set(-0.6, CAB_FLOOR + 0.94, -5.36);
-    this.group.add(binnacleFoot);
 
-    // Layout: Tacho mittig oben, kleine Instrumente flankierend,
-    // ICU unten Mitte — nichts überlappt.
+    // Layout (Spieltest-Wunsch): ICU oben MITTIG — durch die obere
+    // Radöffnung sichtbar, nicht hinter der Nabe —, Tacho links und
+    // Drehzahlmesser rechts daneben, kleine Instrumente unten.
     this.gSpeed = new Gauge({ radius: 0.085, min: 0, max: 125, step: 25, label: 'km/h', lambda: 10 });
-    this.gSpeed.group.position.set(0, 0.055, 0.028);
+    this.gSpeed.group.position.set(-0.2, 0.045, 0.028);
     this.binnacle.add(this.gSpeed.group);
 
+    // Drehzahlmesser mit ×100-Skala (0–25 = 0–2500 U/min, rot ab 2200)
+    this.gRpm = new Gauge({ radius: 0.085, min: 0, max: 25, step: 5, label: 'U/min ×100', redFrom: 22, redTo: 25, lambda: 10 });
+    this.gRpm.group.position.set(0.2, 0.045, 0.028);
+    this.binnacle.add(this.gRpm.group);
+
     this.gFuel = new Gauge({ radius: 0.042, min: 0, max: 1, step: 1, label: 'Tank', redFrom: 0, redTo: 0.1, lambda: 2 });
-    this.gFuel.group.position.set(-0.245, 0.06, 0.028);
+    this.gFuel.group.position.set(-0.155, -0.105, 0.028);
     this.binnacle.add(this.gFuel.group);
 
     this.gTemp = new Gauge({ radius: 0.042, min: 40, max: 120, step: 40, label: '°C', redFrom: 105, redTo: 120, lambda: 2 });
-    this.gTemp.group.position.set(-0.15, -0.085, 0.028);
+    this.gTemp.group.position.set(-0.055, -0.105, 0.028);
     this.binnacle.add(this.gTemp.group);
 
     this.gAir1 = new Gauge({ radius: 0.042, min: 0, max: 12, step: 4, label: 'bar 1', redFrom: 0, redTo: 5.5, lambda: 4 });
-    this.gAir1.group.position.set(0.245, 0.06, 0.028);
+    this.gAir1.group.position.set(0.055, -0.105, 0.028);
     this.binnacle.add(this.gAir1.group);
 
     this.gAir2 = new Gauge({ radius: 0.042, min: 0, max: 12, step: 4, label: 'bar 2', redFrom: 0, redTo: 5.5, lambda: 4 });
-    this.gAir2.group.position.set(0.15, -0.085, 0.028);
+    this.gAir2.group.position.set(0.155, -0.105, 0.028);
     this.binnacle.add(this.gAir2.group);
 
-    this.gauges = [this.gSpeed, this.gFuel, this.gTemp, this.gAir1, this.gAir2];
+    this.gauges = [this.gSpeed, this.gRpm, this.gFuel, this.gTemp, this.gAir1, this.gAir2];
 
-    // ICU-Display unter dem Tacho (frei stehend, kein Überlapp)
+    // ICU-Display oben mittig zwischen den großen Instrumenten
     this.icu = new ICUDisplay();
-    this.icu.mesh.position.set(0, -0.1, 0.028);
+    this.icu.mesh.position.set(0, 0.075, 0.028);
     this.binnacle.add(this.icu.mesh);
 
     // Kontrollleuchten-Reihe zwischen Tacho und ICU
     this._buildTelltales();
 
-    // ---------- Lenksäule (etwas höher + an die Konsole gerückt; Kranz
-    // bleibt unter der Sichtlinie Fahrerauge → ICU-Unterkante)
+    // ---------- Lenksäule (Kranz über dem tief liegenden Kombiinstrument:
+    // Sichtlinie Auge → Panel-Oberkante läuft knapp über den Kranz)
     this.column = new SteeringColumn(dashMat);
-    this.column.group.position.set(-0.6, CAB_FLOOR + 0.96, -4.88);
+    this.column.group.position.set(-0.6, CAB_FLOOR + 0.95, -4.82);
     this.group.add(this.column.group);
 
-    // Blinkerhebel-Klickzonen (über/unter dem Hebel, mit der Säule gewandert)
+    // Blinkerhebel-Klickzonen (über/unter dem Hebelknauf links der Säule)
     this.buttons.createZone({
-      size: new THREE.Vector3(0.1, 0.07, 0.16),
-      position: new THREE.Vector3(-0.78, CAB_FLOOR + 0.9, -5.0),
+      size: new THREE.Vector3(0.14, 0.08, 0.18),
+      position: new THREE.Vector3(-0.84, CAB_FLOOR + 0.88, -4.84),
       parent: this.group,
       name: 'stalkUp',
       action: () => this._stalk(1),
     });
     this.buttons.createZone({
-      size: new THREE.Vector3(0.1, 0.07, 0.16),
-      position: new THREE.Vector3(-0.78, CAB_FLOOR + 0.74, -5.0),
+      size: new THREE.Vector3(0.14, 0.08, 0.18),
+      position: new THREE.Vector3(-0.84, CAB_FLOOR + 0.72, -4.84),
       parent: this.group,
       name: 'stalkDown',
       action: () => this._stalk(-1),
     });
     // Hebelspitze drücken = Fernlicht (nur bei Abblendlicht wirksam)
     this.buttons.createZone({
-      size: new THREE.Vector3(0.12, 0.08, 0.16),
-      position: new THREE.Vector3(-0.9, CAB_FLOOR + 0.82, -5.0),
+      size: new THREE.Vector3(0.12, 0.08, 0.18),
+      position: new THREE.Vector3(-0.95, CAB_FLOOR + 0.8, -4.84),
       parent: this.group,
       name: 'stalkPush',
       action: () => this._stalkPush(),
@@ -279,7 +283,8 @@ export class Cockpit {
       const mat = new THREE.MeshBasicMaterial({ map: telltaleTexture(kind, color), toneMapped: false });
       mat.color.setScalar(0.12); // aus: nur schwach erkennbar
       const mesh = new THREE.Mesh(geo, mat);
-      mesh.position.set((i - 4) * 0.024, -0.045, 0.0285);
+      // mittig zwischen ICU-Unterkante und unterer Instrumentenreihe
+      mesh.position.set((i - 4) * 0.024, -0.04, 0.0285);
       this.binnacle.add(mesh);
       return { mat, get };
     });
@@ -298,19 +303,21 @@ export class Cockpit {
       position: new THREE.Vector3(x, y, 0.018),
     });
 
+    // Flacher Sockel ganz unter dem geneigten Panel — Tastenfronten bleiben
+    // vor der Sockelfront, nichts taucht ins Kunststoff ein.
     const makeBank = (x, w) => {
-      const sockel = new THREE.Mesh(new RoundedBoxGeometry(w + 0.03, 0.14, 0.18, 2, 0.02), darkMat);
-      sockel.position.set(x, CAB_FLOOR + 0.78, -5.21);
+      const sockel = new THREE.Mesh(new RoundedBoxGeometry(w + 0.03, 0.1, 0.16, 2, 0.02), darkMat);
+      sockel.position.set(x, CAB_FLOOR + 0.72, -5.23);
       this.group.add(sockel);
       const panel = new THREE.Mesh(new RoundedBoxGeometry(w, 0.13, 0.03, 2, 0.01), darkMat);
-      panel.position.set(x, CAB_FLOOR + 0.86, -5.17);
+      panel.position.set(x, CAB_FLOOR + 0.8, -5.19);
       panel.rotation.x = -0.5;
       this.group.add(panel);
       return panel;
     };
 
     // ----- links: Lichtstufen (exklusiv) + Fahrerlicht + Dimmer
-    const bankL = makeBank(-1.06, 0.18);
+    const bankL = makeBank(-1.08, 0.18);
     addBtn(bankL, -0.055, 0.032, {
       symbol: 'light-off', label: 'AUS',
       action: () => { bus.lightsMode = 0; },
@@ -343,7 +350,7 @@ export class Cockpit {
     });
 
     // ----- rechts: Retarder 0–3 (exklusiv) + ASR + Türfreigabe + Gebläse
-    const bankR = makeBank(-0.18, 0.24);
+    const bankR = makeBank(-0.17, 0.24);
     for (let n = 0; n <= 3; n++) {
       addBtn(bankR, -0.085 + n * 0.0567, 0.032, {
         symbol: 'retarder', label: String(n),
@@ -438,9 +445,11 @@ export class Cockpit {
   _buildButtonPanels(darkMat) {
     const bus = this.bus;
 
-    // Linkes Feld: Türen + Kneeling + Haltestellenbremse
+    // Linkes Feld: Türen + Kneeling + Haltestellenbremse.
+    // Unterkante über dem Konsolendeckel (+0.275) — Tasten tauchten sonst
+    // in die Konsolenoberfläche ein (Spieltest-Feedback).
     const panelL = new THREE.Mesh(new RoundedBoxGeometry(0.18, 0.13, 0.03, 2, 0.01), darkMat);
-    panelL.position.set(-1.06, CAB_FLOOR + 0.92, -5.32);
+    panelL.position.set(-1.06, CAB_FLOOR + 0.97, -5.32);
     panelL.rotation.x = -0.45;
     this.group.add(panelL);
 
@@ -478,7 +487,7 @@ export class Cockpit {
 
     // Rechtes Feld: Warnblinker, Licht, Innenlicht, Wischer + Wählhebel
     const panelR = new THREE.Mesh(new RoundedBoxGeometry(0.24, 0.13, 0.03, 2, 0.01), darkMat);
-    panelR.position.set(-0.18, CAB_FLOOR + 0.92, -5.36);
+    panelR.position.set(-0.18, CAB_FLOOR + 0.97, -5.36);
     panelR.rotation.x = -0.45;
     this.group.add(panelR);
 
@@ -576,6 +585,7 @@ export class Cockpit {
 
   update(dt, bus, env, timeOfDay) {
     this.gSpeed.setValue(bus.speedKmh);
+    this.gRpm.setValue(bus.engine.rpm / 100); // ×100-Skala
     this.gFuel.setValue(bus.engine.fuelLevel);
     this.gTemp.setValue(bus.engine.coolantTemp);
     this.gAir1.setValue(bus.air.circuit1);

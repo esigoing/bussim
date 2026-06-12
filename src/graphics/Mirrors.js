@@ -12,7 +12,9 @@ const CONFIGS = {
     size: [0.2, 0.42],
     rtAspect: 0.55,
     fov: 22,
-    rotY: Math.PI - 0.30,
+    // weniger nach außen gedreht: mehr eigene Fahrbahn/Busflanke im Bild,
+    // weniger Gehweg der Gegenseite (Spieltest-Feedback)
+    rotY: Math.PI - 0.14,
     rotX: -0.03,
     planeRotY: -0.28,
   },
@@ -20,7 +22,8 @@ const CONFIGS = {
     size: [0.2, 0.42],
     rtAspect: 0.55,
     fov: 22,
-    rotY: Math.PI + 0.30,
+    // etwas weniger nach außen gedreht (Spieltest-Feedback)
+    rotY: Math.PI + 0.22,
     rotX: -0.03,
     planeRotY: 0.28,
   },

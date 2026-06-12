@@ -493,18 +493,35 @@ export class BusModel {
         g.add(bolt);
       }
       g.add(tire, rim);
-      g.position.set(x, -0.85, z);
+      // Sichtposition statt Physik-Spurweite: Reifenaußenfläche 5 mm vor
+      // der Bordwand. Der Rumpf hat keine echten Radausschnitte — vorn lag
+      // der Reifen 7,5 cm HINTER der weißen Schürze und war unsichtbar,
+      // hinten ragte der Zwilling 5 cm hindurch (Spieltest-Feedback).
+      // update() überschreibt nur position.y (Federung), x bleibt erhalten.
+      const sx = x < 0 ? -1 : 1;
+      const visX = sx * (HALF_W + 0.005 - (twin ? 0.275 : 0.15));
+      g.position.set(visX, -0.85, z);
       this.group.add(g);
       this.wheelMeshes.push(g);
 
-      // Radkasten (dunkle Wanne)
+      // Radkasten (dunkle Wanne) — offen (openEnded): die Enddeckel
+      // verdeckten sonst als Halbscheiben die Reifenflanke.
       const arch = new THREE.Mesh(
-        new THREE.CylinderGeometry(WHEEL_R + 0.14, WHEEL_R + 0.14, 0.36, 16, 1, false, 0, Math.PI),
+        new THREE.CylinderGeometry(WHEEL_R + 0.14, WHEEL_R + 0.14, 0.36, 16, 1, true, 0, Math.PI),
         this.trimMat
       );
       arch.geometry.rotateZ(Math.PI / 2);
-      arch.position.set(x, -0.85, z);
+      arch.position.set(visX, -0.85, z);
       this.group.add(arch);
+
+      // Dunkler Radhaus-Hintergrund auf der Bordwand — liest sich von
+      // außen als Radausschnitt hinter dem Reifen
+      const well = new THREE.Mesh(
+        new THREE.CircleGeometry(WHEEL_R + 0.13, 24, 0, Math.PI), this.rubberMat
+      );
+      well.rotation.y = sx * Math.PI / 2;
+      well.position.set(sx * (HALF_W + 0.001), -0.85, z);
+      this.group.add(well);
     });
   }
 

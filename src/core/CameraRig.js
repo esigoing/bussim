@@ -24,6 +24,17 @@ export class CameraRig {
     return this.mode === 'cockpit' || this.mode === 'cabin';
   }
 
+  // Mausrad-Zoom als FOV-Zoom; Projektion nur bei Änderung neu rechnen
+  _applyZoom(zoom) {
+    const cam = this.camera;
+    if (this._baseFov === undefined) this._baseFov = cam.fov;
+    const fov = this._baseFov / zoom;
+    if (Math.abs(fov - cam.fov) > 0.01) {
+      cam.fov = fov;
+      cam.updateProjectionMatrix();
+    }
+  }
+
   setMode(m) {
     this.mode = m;
   }
@@ -40,8 +51,10 @@ export class CameraRig {
       _qYaw.setFromAxisAngle(Y_AXIS, input.lookYaw);
       _qPitch.setFromAxisAngle(X_AXIS, input.lookPitch);
       cam.quaternion.copy(busGroup.quaternion).multiply(_qYaw).multiply(_qPitch);
+      this._applyZoom(input.zoom);
       return;
     }
+    this._applyZoom(1);
 
     if (this.mode === 'chase') {
       busGroup.localToWorld(_pos.set(0, 4.6, 17));

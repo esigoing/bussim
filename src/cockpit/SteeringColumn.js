@@ -15,30 +15,32 @@ export class SteeringColumn {
     const rimMat = new THREE.MeshStandardMaterial({ color: 0x17181a, roughness: 0.45 });
     const columnMat = dashMat || new THREE.MeshStandardMaterial({ color: 0x222326, roughness: 0.6 });
 
-    // Säule: läuft vom Radnaben-Punkt (lokaler Ursprung) schräg nach
-    // vorn-unten bis in den Konsolenkörper — Rad darf nicht frei schweben.
-    const column = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.06, 0.9, 12), columnMat);
-    column.rotation.x = this.tilt;
-    column.position.set(0, -0.262, -0.366);
+    // Säule: steil vom Radnaben-Punkt (lokaler Ursprung) hinunter aufs
+    // Podest zwischen den Knien — wie beim echten Stadtbus steht das flache
+    // Rad auf einer deutlich steileren Säule. Rad darf nicht frei schweben.
+    const column = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.06, 1.0, 12), columnMat);
+    column.rotation.x = 0.28;
+    column.position.set(0, -0.48, -0.135);
     this.group.add(column);
-    // Manschette am Säulenfuß kaschiert den Übergang in die Konsole
-    const boot = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.09, 0.16, 12), columnMat);
-    boot.rotation.x = this.tilt;
-    boot.position.set(0, -0.46, -0.64);
+    // Manschette am Säulenfuß kaschiert den Übergang ins Podest
+    const boot = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.095, 0.16, 12), columnMat);
+    boot.rotation.x = 0.28;
+    boot.position.set(0, -0.92, -0.25);
     this.group.add(boot);
 
     // Radgruppe: lokale +z-Normale zeigt zum Fahrer (oben-hinten)
     this.wheelGroup = new THREE.Group();
     this.wheelGroup.rotation.x = this.tilt - Math.PI / 2;
 
-    // Kranz r=0.21: klein genug, dass der Blick vom Fahrerauge ÜBER den
-    // Kranz aufs (höher gesetzte) Kombiinstrument geht — Scania-typisch.
-    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.21, 0.022, 14, 40), rimMat);
+    // Kranz r=0.27: der Blick geht DURCH die freie obere Radöffnung aufs
+    // tief liegende Kombiinstrument — Scania-typisch.
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.27, 0.024, 14, 40), rimMat);
     this.wheelGroup.add(rim);
-    // Speichen (mit dem Kranz skaliert)
-    for (const a of [Math.PI / 2, Math.PI + 0.6, Math.PI * 2 - 0.6]) {
-      const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.19, 0.018), rimMat);
-      spoke.position.set(Math.cos(a) * 0.105, Math.sin(a) * 0.105, 0);
+    // Speichen: 3 und 9 Uhr + unten — die größte Lücke liegt OBEN,
+    // damit die Armaturen hinter dem Rad erkennbar bleiben
+    for (const a of [0, Math.PI, Math.PI * 1.5]) {
+      const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.034, 0.22, 0.018), rimMat);
+      spoke.position.set(Math.cos(a) * 0.15, Math.sin(a) * 0.15, 0);
       spoke.rotation.z = a - Math.PI / 2;
       this.wheelGroup.add(spoke);
     }
@@ -55,10 +57,11 @@ export class SteeringColumn {
 
     this.group.add(this.wheelGroup);
 
-    // Blinkerhebel: an der Säule UNTER dem Kranz, ragt nach links-unten
-    // deutlich über den Kranz (r = 0.21) hinaus — kein Kontakt zum Rad.
+    // Blinkerhebel: sitzt an der Säule UNTER dem Kranz (lokal -z = zur
+    // Konsole, nicht zum Fahrer — sonst schwebt er vor dem Rad) und ragt
+    // nach links über den Kranz hinaus.
     this.stalk = new THREE.Group();
-    this.stalk.position.set(-0.04, -0.14, 0.16);
+    this.stalk.position.set(-0.02, -0.19, -0.07);
     this.stalk.rotation.x = this.tilt;
     this.stalk.rotation.z = -0.25; // leicht nach unten geneigt
     const lever = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.013, 0.22, 8), rimMat);

@@ -29,7 +29,8 @@ export class ICUDisplay {
 
   // Fahrplan-Anbindung (WP-C3): Abweichung in Sekunden, + = verspätet /
   // − = verfrüht (Konvention von BusRoute.delaySeconds), null = keine
-  // Anzeige. Die ANZEIGE folgt der RBL-Konvention: '+' = früh, '−' = spät.
+  // Anzeige. Anzeige in derselben Konvention wie der HUD-Chip
+  // ('+' = verspätet) — zwei Vorzeichen-Systeme verwirren (Spieltest).
   setDelay(seconds) {
     this.delay = seconds;
   }
@@ -113,14 +114,14 @@ export class ICUDisplay {
     ctx.textAlign = 'left';
     ctx.fillText(`▶ ${this.nextStop}`, 10, 141);
 
-    // Fahrplanlage rechts in der Haltestellen-Leiste (wie beim Scania-ICU):
-    // Minuten:Sekunden, '+' = verfrüht / '−' = verspätet (RBL-Konvention,
-    // intern ist delay > 0 = verspätet). Farbe: grün = pünktlich (±60 s),
-    // rot = verspätet, gelb = zu früh.
+    // Fahrplanlage rechts in der Haltestellen-Leiste: Minuten:Sekunden,
+    // '+' = verspätet / '−' = verfrüht (gleiche Konvention wie der
+    // HUD-Chip). Farbe: grün = pünktlich (±60 s), rot = verspätet,
+    // gelb = zu früh.
     if (this.delay !== null && this.delay !== undefined) {
       const late = this.delay > 0;
       const s = Math.round(Math.abs(this.delay));
-      const txt = `${late ? '−' : '+'}${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+      const txt = `${late ? '+' : '−'}${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
       ctx.font = 'bold 15px Arial';
       const tw = ctx.measureText(txt).width;
       ctx.fillStyle = s <= 60 ? '#1d7a42' : late ? '#b3271e' : '#a87f16';

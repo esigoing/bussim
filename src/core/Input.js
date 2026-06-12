@@ -13,11 +13,13 @@ export class Input {
     this.brake = 0;
     this.steer = 0;          // -1 = links
 
-    // Freier Blick (Rechtsklick-Drag)
+    // Freier Blick (Rechtsklick-Drag). Kehrt NICHT automatisch zur Mitte
+    // zurück (Spieltest-Wunsch) — Mittelklick zentriert Blick und Zoom.
     this.lookActive = false;
     this.lookYaw = 0;        // rad, relativ zur Sitz-Blickrichtung
     this.lookPitch = 0;
-    this._returnLook = true;
+    this._returnLook = false;
+    this.zoom = 1;           // Mausrad: 0.75 (weit) über 1 (normal) bis 3 (nah)
 
     // Maus für Cockpit-Raycasts
     this.mouseNDC = { x: 0, y: 0 };
@@ -42,7 +44,19 @@ export class Input {
     this.dom.addEventListener('mousedown', (e) => {
       if (e.button === 2) this.lookActive = true;
       if (e.button === 0) this.clicked = true;
+      if (e.button === 1) { // Mittelklick: Blick + Zoom zurücksetzen
+        e.preventDefault();
+        this.lookYaw = 0;
+        this.lookPitch = 0;
+        this.zoom = 1;
+      }
     });
+    // Mausrad: rein-/rauszoomen (FOV-Zoom, wirkt in den Innenansichten);
+    // auch unter die Default-Perspektive hinaus (Weitwinkel bis 0.75)
+    this.dom.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      this.zoom = clamp(this.zoom * Math.exp(-e.deltaY * 0.0011), 0.75, 3);
+    }, { passive: false });
     window.addEventListener('mouseup', (e) => {
       if (e.button === 2) this.lookActive = false;
     });
