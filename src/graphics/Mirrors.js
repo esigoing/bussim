@@ -22,9 +22,9 @@ const CONFIGS = {
     size: [0.2, 0.42],
     rtAspect: 0.55,
     fov: 28, // etwas weitwinkliger (Spieltest-Feedback)
-    // deutlich zur Busflanke gedreht: der Bus ist am Bildrand sichtbar
-    // (Spieltest-Feedback: „mehr vom Bus zeigen")
-    rotY: Math.PI + 0.14,
+    // stark zur Busflanke gedreht: der Bus ist deutlich am Bildrand
+    // sichtbar (Spieltest-Feedback, zweimal nachjustiert)
+    rotY: Math.PI + 0.08,
     rotX: -0.03,
     planeRotY: 0.28,
   },
