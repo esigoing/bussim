@@ -14,6 +14,13 @@ export const PRESETS = {
     pixelRatioCap: 1,
     anisotropy: 2,
     drawDistance: 450,
+    trafficCount: 40,      // KI-Fahrzeuge gesamt
+    pedestrianCount: 0,    // Fußgänger auf Gehwegen
+    waitingMax: 4,         // max. Wartende je Haltestelle
+    propsDensity: 0.6,     // Dichtefaktor für Stadtmöblierung/Props
+    cityDetail: 0,         // Detailstufe der Stadtgeometrie (0–3)
+    figureDetail: 'low',   // Geometriedetail der Figuren
+    figureProps: false,    // Accessoires an Figuren (Taschen etc.)
   },
   medium: {
     shadowMapSize: 1024,
@@ -28,6 +35,13 @@ export const PRESETS = {
     pixelRatioCap: 1.5,
     anisotropy: 4,
     drawDistance: 650,
+    trafficCount: 70,      // KI-Fahrzeuge gesamt
+    pedestrianCount: 15,   // Fußgänger auf Gehwegen
+    waitingMax: 6,         // max. Wartende je Haltestelle
+    propsDensity: 0.8,     // Dichtefaktor für Stadtmöblierung/Props
+    cityDetail: 1,         // Detailstufe der Stadtgeometrie (0–3)
+    figureDetail: 'med',   // Geometriedetail der Figuren
+    figureProps: false,    // Accessoires an Figuren (Taschen etc.)
   },
   high: {
     shadowMapSize: 2048,
@@ -42,6 +56,13 @@ export const PRESETS = {
     pixelRatioCap: 2,
     anisotropy: 8,
     drawDistance: 900,
+    trafficCount: 110,     // KI-Fahrzeuge gesamt
+    pedestrianCount: 30,   // Fußgänger auf Gehwegen
+    waitingMax: 8,         // max. Wartende je Haltestelle
+    propsDensity: 1.0,     // Dichtefaktor für Stadtmöblierung/Props
+    cityDetail: 2,         // Detailstufe der Stadtgeometrie (0–3)
+    figureDetail: 'high',  // Geometriedetail der Figuren
+    figureProps: true,     // Accessoires an Figuren (Taschen etc.)
   },
   ultra: {
     shadowMapSize: 4096,
@@ -56,6 +77,13 @@ export const PRESETS = {
     pixelRatioCap: 2,
     anisotropy: 16,
     drawDistance: 1200,
+    trafficCount: 150,     // KI-Fahrzeuge gesamt
+    pedestrianCount: 50,   // Fußgänger auf Gehwegen
+    waitingMax: 10,        // max. Wartende je Haltestelle
+    propsDensity: 1.25,    // Dichtefaktor für Stadtmöblierung/Props
+    cityDetail: 3,         // Detailstufe der Stadtgeometrie (0–3)
+    figureDetail: 'high',  // Geometriedetail der Figuren
+    figureProps: true,     // Accessoires an Figuren (Taschen etc.)
   },
 };
 

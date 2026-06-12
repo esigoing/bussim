@@ -132,9 +132,9 @@ export class Gauge {
     this.target = clamp(v, this.min, this.max);
   }
 
-  // Nachtbeleuchtung der Instrumente
-  setBacklight(intensity) {
-    this.dialMat.emissiveIntensity = intensity * 0.35;
+  // Nachtbeleuchtung der Instrumente; dim = Instrumenten-Dimmer (bus.dashDim)
+  setBacklight(intensity, dim = 1) {
+    this.dialMat.emissiveIntensity = intensity * 0.35 * dim;
     this.dialMat.emissiveMap = this.dialMat.map;
   }
 

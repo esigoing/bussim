@@ -25,21 +25,23 @@ export class SteeringColumn {
     this.wheelGroup = new THREE.Group();
     this.wheelGroup.rotation.x = this.tilt - Math.PI / 2;
 
-    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.235, 0.022, 14, 40), rimMat);
+    // Kranz r=0.21: klein genug, dass der Blick vom Fahrerauge ÜBER den
+    // Kranz aufs (höher gesetzte) Kombiinstrument geht — Scania-typisch.
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.21, 0.022, 14, 40), rimMat);
     this.wheelGroup.add(rim);
-    // Speichen
+    // Speichen (mit dem Kranz skaliert)
     for (const a of [Math.PI / 2, Math.PI + 0.6, Math.PI * 2 - 0.6]) {
-      const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.21, 0.018), rimMat);
-      spoke.position.set(Math.cos(a) * 0.115, Math.sin(a) * 0.115, 0);
+      const spoke = new THREE.Mesh(new THREE.BoxGeometry(0.032, 0.19, 0.018), rimMat);
+      spoke.position.set(Math.cos(a) * 0.105, Math.sin(a) * 0.105, 0);
       spoke.rotation.z = a - Math.PI / 2;
       this.wheelGroup.add(spoke);
     }
     // Nabe mit Scania-Emblem
-    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.055, 0.035, 20), rimMat);
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.035, 20), rimMat);
     hub.rotation.x = Math.PI / 2;
     this.wheelGroup.add(hub);
     const emblem = new THREE.Mesh(
-      new THREE.CircleGeometry(0.035, 20),
+      new THREE.CircleGeometry(0.032, 20),
       new THREE.MeshStandardMaterial({ map: this._emblemTexture(), roughness: 0.3, metalness: 0.4 })
     );
     emblem.position.z = 0.019;
@@ -48,7 +50,7 @@ export class SteeringColumn {
     this.group.add(this.wheelGroup);
 
     // Blinkerhebel: an der Säule UNTER dem Kranz, ragt nach links-unten
-    // deutlich über den Kranz (r = 0.235) hinaus — kein Kontakt zum Rad.
+    // deutlich über den Kranz (r = 0.21) hinaus — kein Kontakt zum Rad.
     this.stalk = new THREE.Group();
     this.stalk.position.set(-0.04, -0.14, 0.16);
     this.stalk.rotation.x = this.tilt;

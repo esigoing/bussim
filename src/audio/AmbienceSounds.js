@@ -26,6 +26,9 @@ export class AmbienceSounds {
     this.roll = audio.makeLoop(pink, { filterType: 'lowpass', filterFreq: 350 });
     this.wind = audio.makeLoop(white, { filterType: 'bandpass', filterFreq: 900, q: 0.5 });
 
+    // Klimagebläse: leises, tief gefiltertes Rauschen, Pegel folgt bus.fanLevel
+    this.fan = audio.makeLoop(pink, { filterType: 'lowpass', filterFreq: 420 });
+
     // Gemurmel: drei verstimmte Formant-Bänder
     this.murmur = [300, 800, 1750].map((f, i) =>
       audio.makeLoop(pink, { filterType: 'bandpass', filterFreq: f, q: 3.5 })
@@ -92,6 +95,11 @@ export class AmbienceSounds {
         src.stop(t + 0.05);
       }
     }
+
+    // Klimagebläse: Stufe 0..2 → Pegel und Rauschfarbe
+    const fan = bus.fanLevel || 0;
+    this.fan.gain.gain.setTargetAtTime([0, 0.045, 0.1][fan] || 0, t, 0.3);
+    this.fan.filter.frequency.setTargetAtTime(380 + fan * 180, t, 0.3);
 
     // Roll-/Windgeräusch ∝ v²
     const vNorm = Math.min(1, speed / 70);

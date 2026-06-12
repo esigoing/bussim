@@ -1,5 +1,5 @@
 import puppeteer from 'puppeteer-core';
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+import { CHROME, SHOT_DIR } from './_env.mjs';
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new',
   args: ['--window-size=1280,800', '--use-gl=angle', '--enable-unsafe-swiftshader', '--mute-audio'] });
 const page = await browser.newPage();
@@ -24,5 +24,5 @@ await page.evaluate(() => {
   };
 });
 await new Promise((r) => setTimeout(r, 500));
-await page.screenshot({ path: '/tmp/bussim-shots/84-valley2.png' });
+await page.screenshot({ path: `${SHOT_DIR}/84-valley2.png` });
 await browser.close();

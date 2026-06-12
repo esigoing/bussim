@@ -10,11 +10,12 @@ const S0 = 2.6;          // m Mindestabstand
 const LOOKAHEAD = 70;    // m Sichtweite über Kanten hinweg
 
 export class CarAI {
-  constructor(edge, s, rand) {
+  // len: Fahrzeuglänge in m (aus der Typ-Konfig, für IDM-Abstände)
+  constructor(edge, s, rand, len = 4.5) {
     this.edge = edge;
     this.s = s;
     this.v = 0;
-    this.len = 4.5;
+    this.len = len;
     this.rand = rand;
     this.nextEdge = this._pickNext();
     this.stuckTimer = 0;

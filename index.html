@@ -98,6 +98,37 @@
       border-radius: 4px; padding: 1px 8px; font-size: 13px;
     }
     #nextStop .stop-name { font-weight: 600; }
+    #nextStop .plan-time { color: var(--dim); font-size: 12px; font-variant-numeric: tabular-nums; }
+    #nextStop .delay-chip {
+      font-size: 12px; font-weight: 700; border-radius: 4px; padding: 1px 7px;
+      font-variant-numeric: tabular-nums;
+      background: rgba(255,255,255,0.1); color: var(--dim);
+    }
+    #nextStop .delay-chip.late { background: rgba(192,42,32,0.25); color: #ff8a7a; }
+    #nextStop .delay-chip.early { background: rgba(50,110,190,0.25); color: #8ec4ff; }
+    #nextStop .delay-chip.ontime { background: rgba(30,120,52,0.25); color: #7ddb96; }
+
+    /* ---------- Fahrplan-Overlay ---------- */
+    #timetable {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      background: var(--panel); border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 12px; padding: 22px 28px; min-width: 340px;
+      display: none; pointer-events: none;
+      box-shadow: 0 18px 60px rgba(0,0,0,0.55);
+    }
+    #timetable.visible { display: block; }
+    #timetable h2 {
+      font-size: 15px; margin-bottom: 12px; letter-spacing: 0.4px;
+    }
+    #timetable h2 span { color: var(--accent); }
+    #timetable table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    #timetable td {
+      padding: 4px 10px 4px 0; font-variant-numeric: tabular-nums;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    #timetable tr.next td { color: var(--accent); font-weight: 600; }
+    #timetable tr.passed td { color: rgba(255,255,255,0.3); }
+    #timetable .tt-hint { margin-top: 10px; font-size: 11px; color: var(--dim); }
     #hudMsg {
       position: absolute; top: 76px; left: 50%; transform: translateX(-50%);
       background: rgba(20, 80, 30, 0.85); border-radius: 8px; padding: 8px 20px;
@@ -143,7 +174,16 @@
   <div id="app"></div>
 
   <div id="hud">
-    <div id="nextStop"><span class="line-badge">73</span><span class="stop-name">—</span></div>
+    <div id="nextStop">
+      <span class="line-badge">73</span><span class="stop-name">—</span>
+      <span class="plan-time" id="planTime"></span>
+      <span class="delay-chip" id="delayChip">—</span>
+    </div>
+    <div id="timetable">
+      <h2>Linie <span>73</span> · Fahrplan</h2>
+      <table><tbody id="timetableBody"></tbody></table>
+      <div class="tt-hint">Taste O schließt den Fahrplan</div>
+    </div>
     <div id="hudMsg"></div>
     <div id="ticketPrompt"></div>
     <canvas id="minimap" width="200" height="200"></canvas>

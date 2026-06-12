@@ -1,10 +1,9 @@
 // Visuelle Prüfung: Abendsonne (Schatten), Nacht (Lichter), Regen (Scheibe).
 
 import puppeteer from 'puppeteer-core';
+import { CHROME, SHOT_DIR as SHOT } from './_env.mjs';
 
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const URL = 'http://localhost:5173/?seed=73';
-const SHOT = '/tmp/bussim-shots';
 
 const browser = await puppeteer.launch({
   executablePath: CHROME,

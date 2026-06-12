@@ -19,6 +19,94 @@ const CAB_FLOOR = FLOOR_Y + 0.24;
 // hinter dem Armaturenbrett — sonst klebt man an der Scheibe.
 export const DRIVER_EYE = new THREE.Vector3(-0.62, 0.82, -4.5);
 
+// IBIS-Zielliste (Außenanzeige liest bus.destination)
+const DESTINATIONS = ['Hauptbahnhof', 'Rathaus', 'Klinikum', 'Universität', 'Theater', 'Betriebshof'];
+
+// Kontrollleuchten-Symbol auf dunklem Grund (kleine emissive Plane)
+function telltaleTexture(kind, color) {
+  const c = document.createElement('canvas');
+  c.width = 96;
+  c.height = 64;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#0b0c0e';
+  ctx.fillRect(0, 0, 96, 64);
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = 5;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  const cx = 48, cy = 32;
+  switch (kind) {
+    case 'arrowL':
+      ctx.beginPath();
+      ctx.moveTo(20, cy); ctx.lineTo(46, 10); ctx.lineTo(46, 54); ctx.closePath();
+      ctx.fill();
+      ctx.fillRect(48, cy - 9, 28, 18);
+      break;
+    case 'arrowR':
+      ctx.beginPath();
+      ctx.moveTo(76, cy); ctx.lineTo(50, 10); ctx.lineTo(50, 54); ctx.closePath();
+      ctx.fill();
+      ctx.fillRect(20, cy - 9, 28, 18);
+      break;
+    case 'beam': // Fernlicht: Lampe mit waagerechten Strahlen
+      ctx.beginPath();
+      ctx.arc(60, cy, 16, -Math.PI / 2, Math.PI / 2);
+      ctx.closePath();
+      ctx.fill();
+      for (let i = -1; i <= 1; i++) {
+        ctx.beginPath();
+        ctx.moveTo(18, cy + i * 13); ctx.lineTo(40, cy + i * 13);
+        ctx.stroke();
+      }
+      break;
+    case 'door': // Tür offen
+      ctx.strokeRect(26, 10, 18, 44);
+      ctx.strokeRect(52, 10, 18, 44);
+      break;
+    case 'park':
+      ctx.beginPath();
+      ctx.arc(cx, cy, 22, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.font = 'bold 28px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('P', cx, cy + 10);
+      break;
+    case 'ret1':
+    case 'ret2':
+    case 'ret3': // Retarder: Gefälle + Stufenziffer
+      ctx.beginPath();
+      ctx.moveTo(12, 18); ctx.lineTo(58, 50); ctx.lineTo(12, 50); ctx.closePath();
+      ctx.stroke();
+      ctx.font = 'bold 34px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(kind.slice(3), 76, 46);
+      break;
+    case 'asr':
+      ctx.font = 'bold 24px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('ASR', cx, 28);
+      ctx.font = 'bold 18px Arial';
+      ctx.fillText('OFF', cx, 52);
+      break;
+    case 'stop': // Haltewunsch
+      ctx.font = 'bold 26px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('STOP', cx, cy + 9);
+      break;
+    case 'release': // Türfreigabe: Tür + Pfeile nach außen
+      ctx.strokeRect(38, 10, 20, 44);
+      ctx.beginPath();
+      ctx.moveTo(18, cy); ctx.lineTo(32, cy);
+      ctx.moveTo(64, cy); ctx.lineTo(78, cy);
+      ctx.stroke();
+      break;
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 export class Cockpit {
   constructor(bus, busModel) {
     this.bus = bus;
@@ -43,12 +131,18 @@ export class Cockpit {
     this.group.add(dashR);
 
     // ---------- Kombiinstrument
+    // Höher und flacher als die Konsole: der Blick vom Fahrerauge geht
+    // ÜBER den (kleineren) Lenkradkranz auf alle Instrumente — Scania-typisch.
     this.binnacle = new THREE.Group();
-    this.binnacle.position.set(-0.6, CAB_FLOOR + 1.0, -5.32);
-    this.binnacle.rotation.x = -0.32;
+    this.binnacle.position.set(-0.6, CAB_FLOOR + 1.12, -5.32);
+    this.binnacle.rotation.x = -0.18;
     const panel = new THREE.Mesh(new RoundedBoxGeometry(0.64, 0.32, 0.05, 2, 0.02), darkMat);
     this.binnacle.add(panel);
     this.group.add(this.binnacle);
+    // Stützfuß zwischen Konsolenoberkante und Kombiinstrument
+    const binnacleFoot = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.16, 0.1), darkMat);
+    binnacleFoot.position.set(-0.6, CAB_FLOOR + 0.94, -5.36);
+    this.group.add(binnacleFoot);
 
     // Layout: Tacho mittig oben, kleine Instrumente flankierend,
     // ICU unten Mitte — nichts überlappt.
@@ -79,29 +173,47 @@ export class Cockpit {
     this.icu.mesh.position.set(0, -0.1, 0.028);
     this.binnacle.add(this.icu.mesh);
 
-    // ---------- Lenksäule
+    // Kontrollleuchten-Reihe zwischen Tacho und ICU
+    this._buildTelltales();
+
+    // ---------- Lenksäule (näher am Fahrer → Kranz verdeckt nichts)
     this.column = new SteeringColumn(dashMat);
-    this.column.group.position.set(-0.6, CAB_FLOOR + 0.92, -4.98);
+    this.column.group.position.set(-0.6, CAB_FLOOR + 0.92, -4.78);
     this.group.add(this.column.group);
 
-    // Blinkerhebel-Klickzonen (über/unter dem Hebel)
+    // Blinkerhebel-Klickzonen (über/unter dem Hebel, mit der Säule gewandert)
     this.buttons.createZone({
       size: new THREE.Vector3(0.1, 0.07, 0.16),
-      position: new THREE.Vector3(-0.78, CAB_FLOOR + 0.86, -5.1),
+      position: new THREE.Vector3(-0.78, CAB_FLOOR + 0.86, -4.9),
       parent: this.group,
       name: 'stalkUp',
       action: () => this._stalk(1),
     });
     this.buttons.createZone({
       size: new THREE.Vector3(0.1, 0.07, 0.16),
-      position: new THREE.Vector3(-0.78, CAB_FLOOR + 0.7, -5.1),
+      position: new THREE.Vector3(-0.78, CAB_FLOOR + 0.7, -4.9),
       parent: this.group,
       name: 'stalkDown',
       action: () => this._stalk(-1),
     });
+    // Hebelspitze drücken = Fernlicht (nur bei Abblendlicht wirksam)
+    this.buttons.createZone({
+      size: new THREE.Vector3(0.12, 0.08, 0.16),
+      position: new THREE.Vector3(-0.9, CAB_FLOOR + 0.78, -4.9),
+      parent: this.group,
+      name: 'stalkPush',
+      action: () => this._stalkPush(),
+    });
 
     // ---------- Tasterfelder
     this._buildButtonPanels(darkMat);
+    this._buildSwitchBanks(darkMat);
+    this._buildIBIS(darkMat);
+
+    // ---------- Fahrerplatzleuchte (Leselampe überm Sitz)
+    this.driverLamp = new THREE.PointLight(0xffe2b8, 0, 2.2, 2);
+    this.driverLamp.position.set(-0.62, 1.35, -4.55);
+    this.group.add(this.driverLamp);
 
     // ---------- Feststellbremshebel
     this._buildParkBrake(darkMat);
@@ -129,6 +241,187 @@ export class Cockpit {
     // hoch = rechts, runter = links; gleiche Richtung nochmal = aus
     if (dir === 1) bus.blinker = bus.blinker === 1 ? 0 : 1;
     else bus.blinker = bus.blinker === -1 ? 0 : -1;
+  }
+
+  _stalkPush() {
+    const bus = this.bus;
+    Events.emit('buttonPress');
+    if (bus.lightsMode >= 2) bus.highBeam = !bus.highBeam;
+  }
+
+  // Kontrollleuchten-Reihe: 9 kleine Icon-Planes zwischen Tacho und ICU
+  // (x ±0.0945 — bleibt frei von den kleinen Rundinstrumenten bei |x| ≥ 0.108)
+  _buildTelltales() {
+    const geo = new THREE.PlaneGeometry(0.022, 0.015);
+    const defs = [
+      ['arrowL',  '#36d24b', (b) => b.blinkOn && (b.hazard || b.blinker === -1)],
+      ['beam',    '#3d86ff', (b) => b.highBeam && b.lightsMode >= 2],
+      ['ret1',    '#ff9a2e', (b) => b.retarderLevel > 0],
+      ['door',    '#e03333', (b) => b.doors.anyOpen],
+      ['park',    '#e03333', (b) => b.parkingBrake || b.air.springBrakeApplied],
+      ['asr',     '#ff9a2e', (b) => !b.asrOn],
+      ['stop',    '#ffd23e', (b) => b.stopRequested],
+      ['release', '#36d24b', (b) => b.doorReleased],
+      ['arrowR',  '#36d24b', (b) => b.blinkOn && (b.hazard || b.blinker === 1)],
+    ];
+    this.telltales = defs.map(([kind, color, get], i) => {
+      const mat = new THREE.MeshBasicMaterial({ map: telltaleTexture(kind, color), toneMapped: false });
+      mat.color.setScalar(0.12); // aus: nur schwach erkennbar
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.set((i - 4) * 0.024, -0.045, 0.0285);
+      this.binnacle.add(mesh);
+      return { mat, get };
+    });
+    // Retarder-Leuchte zeigt die Stufe — Texturen zum Umschalten vorhalten
+    this._retTex = [1, 2, 3].map((n) => telltaleTexture('ret' + n, '#ff9a2e'));
+    this._retShown = 1;
+  }
+
+  // Linke + rechte Schalterbank: zweite „Terrasse" vor der Konsole,
+  // flankiert die Lenksäule — verdeckt keine Instrumente.
+  _buildSwitchBanks(darkMat) {
+    const bus = this.bus;
+    const addBtn = (parent, x, y, cfg) => this.buttons.createButton({
+      ...cfg,
+      parent,
+      position: new THREE.Vector3(x, y, 0.018),
+    });
+
+    const makeBank = (x, w) => {
+      const sockel = new THREE.Mesh(new RoundedBoxGeometry(w + 0.03, 0.14, 0.18, 2, 0.02), darkMat);
+      sockel.position.set(x, CAB_FLOOR + 0.78, -5.21);
+      this.group.add(sockel);
+      const panel = new THREE.Mesh(new RoundedBoxGeometry(w, 0.13, 0.03, 2, 0.01), darkMat);
+      panel.position.set(x, CAB_FLOOR + 0.86, -5.17);
+      panel.rotation.x = -0.5;
+      this.group.add(panel);
+      return panel;
+    };
+
+    // ----- links: Lichtstufen (exklusiv) + Fahrerlicht + Dimmer
+    const bankL = makeBank(-1.06, 0.18);
+    addBtn(bankL, -0.055, 0.032, {
+      symbol: 'light-off', label: 'AUS',
+      action: () => { bus.lightsMode = 0; },
+      getLit: () => bus.lightsMode === 0 ? 1 : 0,
+    });
+    addBtn(bankL, 0, 0.032, {
+      symbol: 'park-light', label: 'STAND',
+      action: () => { bus.lightsMode = 1; },
+      getLit: () => bus.lightsMode === 1 ? 1 : 0,
+    });
+    addBtn(bankL, 0.055, 0.032, {
+      symbol: 'light', label: 'FAHR',
+      action: () => { bus.lightsMode = 2; },
+      getLit: () => bus.lightsMode === 2 ? 1 : 0,
+    });
+    addBtn(bankL, -0.055, -0.025, {
+      symbol: 'driverlight', label: 'FAHRER',
+      action: () => { bus.driverLight = !bus.driverLight; },
+      getLit: () => bus.driverLight ? 1 : 0,
+    });
+    addBtn(bankL, 0, -0.025, {
+      symbol: 'dim-', label: 'DIM',
+      action: () => { bus.dashDim = Math.max(0.4, Math.round((bus.dashDim - 0.15) * 100) / 100); },
+      getLit: () => 0,
+    });
+    addBtn(bankL, 0.055, -0.025, {
+      symbol: 'dim+', label: 'DIM',
+      action: () => { bus.dashDim = Math.min(1.0, Math.round((bus.dashDim + 0.15) * 100) / 100); },
+      getLit: () => 0,
+    });
+
+    // ----- rechts: Retarder 0–3 (exklusiv) + ASR + Türfreigabe + Gebläse
+    const bankR = makeBank(-0.18, 0.24);
+    for (let n = 0; n <= 3; n++) {
+      addBtn(bankR, -0.085 + n * 0.0567, 0.032, {
+        symbol: 'retarder', label: String(n),
+        action: () => { bus.retarderLevel = n; },
+        getLit: () => bus.retarderLevel === n ? 1 : 0,
+      });
+    }
+    addBtn(bankR, -0.057, -0.025, {
+      symbol: 'asr', label: 'ASR',
+      action: () => { bus.asrOn = !bus.asrOn; },
+      getLit: () => bus.asrOn ? 1 : 0,
+    });
+    addBtn(bankR, 0, -0.025, {
+      symbol: 'doorrel', label: 'FREIG',
+      action: () => { bus.doorReleased = !bus.doorReleased; },
+      getLit: () => bus.doorReleased ? 1 : 0,
+    });
+    addBtn(bankR, 0.057, -0.025, {
+      symbol: 'fan', label: 'LÜFT.',
+      action: () => { bus.fanLevel = (bus.fanLevel + 1) % 3; },
+      getLit: () => bus.fanLevel / 2,
+    });
+  }
+
+  // IBIS-Bedienteil rechts oben an der Konsole: 2-zeiliges Display
+  // (Linie + Ziel) und zwei Tasten vor/zurück. Setzt bus.destIndex/destination.
+  _buildIBIS(darkMat) {
+    const bus = this.bus;
+    bus.destIndex = 0;
+    bus.destination = DESTINATIONS[0];
+
+    this.ibis = new THREE.Group();
+    this.ibis.position.set(0.34, CAB_FLOOR + 1.02, -5.28);
+    this.ibis.rotation.y = -0.65; // zum Fahrer gedreht
+    this.ibis.rotation.x = -0.18;
+    const body = new THREE.Mesh(new RoundedBoxGeometry(0.3, 0.16, 0.05, 2, 0.01), darkMat);
+    this.ibis.add(body);
+    // Standfuß bis zur Konsolenoberkante
+    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.024, 0.26, 8), darkMat);
+    foot.position.set(0, -0.17, -0.02);
+    this.ibis.add(foot);
+
+    this._ibisCanvas = document.createElement('canvas');
+    this._ibisCanvas.width = 256;
+    this._ibisCanvas.height = 96;
+    this._ibisTex = new THREE.CanvasTexture(this._ibisCanvas);
+    this._ibisTex.colorSpace = THREE.SRGBColorSpace;
+    const disp = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.2, 0.075),
+      new THREE.MeshBasicMaterial({ map: this._ibisTex, toneMapped: false })
+    );
+    disp.position.set(-0.035, 0, 0.027);
+    this.ibis.add(disp);
+
+    const step = (d) => {
+      const n = DESTINATIONS.length;
+      bus.destIndex = (bus.destIndex + d + n) % n;
+      bus.destination = DESTINATIONS[bus.destIndex];
+      this._drawIbis();
+    };
+    this.buttons.createButton({
+      symbol: 'arrow-up', label: '', parent: this.ibis,
+      position: new THREE.Vector3(0.105, 0.034, 0.028),
+      action: () => step(1),
+      getLit: () => 0,
+    });
+    this.buttons.createButton({
+      symbol: 'arrow-down', label: '', parent: this.ibis,
+      position: new THREE.Vector3(0.105, -0.034, 0.028),
+      action: () => step(-1),
+      getLit: () => 0,
+    });
+
+    this.group.add(this.ibis);
+    this._drawIbis();
+  }
+
+  _drawIbis() {
+    const c = this._ibisCanvas;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#0a0d10';
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.fillStyle = '#ffb02e';
+    ctx.textAlign = 'left';
+    ctx.font = 'bold 26px monospace';
+    ctx.fillText('Linie 73', 12, 36);
+    ctx.font = 'bold 24px monospace';
+    ctx.fillText(this.bus.destination, 12, 76);
+    this._ibisTex.needsUpdate = true;
   }
 
   _buildButtonPanels(darkMat) {
@@ -184,6 +477,7 @@ export class Cockpit {
       getLit: () => (bus.hazard && bus.blinkOn) ? 1 : 0,
     });
     addBtn(panelR, -0.028, 0.032, {
+      // Abblendlicht-Toggle (lightsOn-Setter springt zwischen Stufe 0 und 2)
       symbol: 'light', label: '',
       action: () => { bus.lightsOn = !bus.lightsOn; },
       getLit: () => bus.lightsOn ? 1 : 0,
@@ -277,8 +571,22 @@ export class Cockpit {
     this.gAir2.setValue(bus.air.circuit2);
     for (const g of this.gauges) g.update(dt);
 
-    const backlight = bus.lightsOn ? 0.8 : (env ? env.night * 0.4 : 0);
-    for (const g of this.gauges) g.setBacklight(backlight);
+    // Instrumentenbeleuchtung: ab Standlicht an, gedimmt über bus.dashDim
+    const backlight = bus.lightsMode >= 1 ? 0.8 : (env ? env.night * 0.4 : 0);
+    for (const g of this.gauges) g.setBacklight(backlight, bus.dashDim);
+
+    // Kontrollleuchten
+    for (const l of this.telltales) {
+      l.mat.color.setScalar(l.get(bus) ? 1 : 0.12);
+    }
+    if (bus.retarderLevel > 0 && bus.retarderLevel !== this._retShown) {
+      this._retShown = bus.retarderLevel;
+      this.telltales[2].mat.map = this._retTex[bus.retarderLevel - 1];
+      this.telltales[2].mat.needsUpdate = true;
+    }
+
+    // Fahrerplatzleuchte weich ein-/ausblenden
+    this.driverLamp.intensity += ((bus.driverLight ? 0.8 : 0) - this.driverLamp.intensity) * Math.min(1, dt * 10);
 
     this.icu.update(dt, bus, timeOfDay);
     this.column.update(dt, bus);

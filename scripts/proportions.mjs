@@ -1,5 +1,5 @@
 import puppeteer from 'puppeteer-core';
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+import { CHROME, SHOT_DIR } from './_env.mjs';
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new',
   args: ['--window-size=1280,800', '--use-gl=angle', '--enable-unsafe-swiftshader', '--mute-audio'] });
 const page = await browser.newPage();
@@ -49,7 +49,7 @@ await page.evaluate(() => {
   };
 });
 await new Promise((r) => setTimeout(r, 600));
-await page.screenshot({ path: '/tmp/bussim-shots/50-side-interior.png' });
+await page.screenshot({ path: `${SHOT_DIR}/50-side-interior.png` });
 
 // Fahrerbereich von rechts
 await page.evaluate(() => {
@@ -65,13 +65,13 @@ await page.evaluate(() => {
   };
 });
 await new Promise((r) => setTimeout(r, 400));
-await page.screenshot({ path: '/tmp/bussim-shots/51-driver-area.png' });
+await page.screenshot({ path: `${SHOT_DIR}/51-driver-area.png` });
 
 // Neue Cockpitansicht (Fahrerblick) prüfen
 await page.evaluate(() => { delete window.game.cameraRig.update; });
 await page.keyboard.press('F1');
 await new Promise((r) => setTimeout(r, 400));
-await page.screenshot({ path: '/tmp/bussim-shots/52-new-eye.png' });
+await page.screenshot({ path: `${SHOT_DIR}/52-new-eye.png` });
 
 const info = await page.evaluate(() => ({
   aboard: window.game.passengers.aboard.length,

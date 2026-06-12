@@ -73,7 +73,17 @@ export class Bus {
     this.hazard = false;
     this.blinkPhase = 0;
     this.blinkOn = false;
-    this.lightsOn = false;
+    this.lightsMode = 0;           // 0 aus, 1 Standlicht, 2 Abblendlicht
+    this.highBeam = false;         // Fernlicht (nur bei lightsMode 2 wirksam)
+    this.retarderLevel = 0;        // Handhebel-Retarder, Stufe 0..3
+    this.retarderActive = false;   // Hebel-Retarder bremst gerade (Kontrollleuchte/ICU)
+    this.doorReleased = false;     // Türfreigabe für die Fahrgast-Taster
+    this.asrOn = true;             // Antriebsschlupfregelung
+    this.dashDim = 1.0;            // Instrumentenbeleuchtung 0.4..1.0
+    this.fanLevel = 0;             // Klimagebläse 0..2
+    this.driverLight = false;      // Fahrerplatzleuchte
+    this.destIndex = 0;            // IBIS-Zielauswahl
+    this.destination = 'Hauptbahnhof';
     this.interiorLightsOn = true;
     this.stopRequested = false;    // „Wagen hält"
 
@@ -91,6 +101,16 @@ export class Bus {
 
   get speedKmh() {
     return this.body.velocity.length() * 3.6;
+  }
+
+  // Kompatibilität: ältere Konsumenten (BusModel, Game) lesen/schreiben
+  // lightsOn als bool „Abblendlicht an" — bildet auf lightsMode ab.
+  get lightsOn() {
+    return this.lightsMode >= 2;
+  }
+
+  set lightsOn(v) {
+    this.lightsMode = v ? 2 : 0;
   }
 
   // Vorzeichenbehaftete Geschwindigkeit in Fahrtrichtung
@@ -168,10 +188,17 @@ export class Bus {
     const springBrake = (this.parkingBrake || this.air.springBrakeApplied) ? 14000 : 0;
     const stopBrakeT = this.stopBrake ? 7000 : 0;
 
+    // Handhebel-Retarder: bremst die Antriebsachse nur ohne Gas; fadet
+    // unterhalb ~10 km/h aus, damit er im Stand nicht blockiert.
+    const leverRet = (this.retarderLevel > 0 && throttle < 0.05)
+      ? this.retarderLevel * 2800 * clamp(speedKmh / 10, 0, 1)
+      : 0;
+    this.retarderActive = leverRet > 100;
+
     this.wheels[0].brakeTorque = serviceFront;
     this.wheels[1].brakeTorque = serviceFront;
-    this.wheels[2].brakeTorque = serviceRear + retarderWheel + springBrake + stopBrakeT;
-    this.wheels[3].brakeTorque = serviceRear + retarderWheel + springBrake + stopBrakeT;
+    this.wheels[2].brakeTorque = serviceRear + retarderWheel + springBrake + stopBrakeT + leverRet / 2;
+    this.wheels[3].brakeTorque = serviceRear + retarderWheel + springBrake + stopBrakeT + leverRet / 2;
     this.wheels[2].driveTorque = axleTorque / 2;
     this.wheels[3].driveTorque = axleTorque / 2;
 
@@ -210,6 +237,9 @@ export class Bus {
     this.air.update(dt, this.engine.rpm, brakePedal);
     this.doors.update(dt);
     this.wipers.update(dt);
+
+    // ---------- Fernlicht erlischt mit dem Abblendlicht
+    if (this.lightsMode < 2) this.highBeam = false;
 
     // ---------- Blinkrelais
     const blinking = this.hazard || this.blinker !== 0;

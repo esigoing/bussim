@@ -111,18 +111,21 @@ export class TicketPrinter {
     slot.position.set(0, -0.045, 0.1);
     this.group.add(slot);
 
-    // Ticket-Mesh (skaliert beim Druck heraus)
+    // Ticket-Mesh (skaliert beim Druck heraus). Pivot an der Oberkante:
+    // so wächst das Ticket aus dem Schacht heraus statt ins Gehäuse hinein.
     this.ticketMat = new THREE.MeshStandardMaterial({ roughness: 0.85 });
-    this.ticket = new THREE.Mesh(new THREE.PlaneGeometry(0.07, 0.13), this.ticketMat);
-    this.ticket.position.set(0, -0.05, 0.105);
+    const tGeo = new THREE.PlaneGeometry(0.07, 0.13);
+    tGeo.translate(0, -0.065, 0);
+    this.ticket = new THREE.Mesh(tGeo, this.ticketMat);
+    this.ticket.position.set(0, -0.044, 0.104);
     this.ticket.rotation.x = -0.5;
     this.ticket.visible = false;
     this.group.add(this.ticket);
 
     // Klickzone fürs fertige Ticket
     buttons.createZone({
-      size: new THREE.Vector3(0.1, 0.1, 0.06),
-      position: new THREE.Vector3(0, -0.07, 0.13),
+      size: new THREE.Vector3(0.12, 0.13, 0.10),
+      position: new THREE.Vector3(0, -0.10, 0.15),
       parent: this.group,
       name: 'ticketTake',
       action: () => this._takeTicket(),
@@ -149,6 +152,7 @@ export class TicketPrinter {
     // Druck startet direkt nach Auswahl
     this.state = 'printing';
     this.printProgress = 0;
+    this.ticket.rotation.x = -0.5; // Druckwinkel zurücksetzen (Entnahme-Kippung aufheben)
     this.ticketMat.map = ticketTexture(type.label, type.price);
     this.ticketMat.needsUpdate = true;
     Events.emit('ticketPrint');
@@ -170,11 +174,13 @@ export class TicketPrinter {
       this.ticket.visible = true;
       const p = Math.min(1, this.printProgress);
       this.ticket.scale.y = Math.max(0.05, p);
-      this.ticket.position.y = -0.05 - p * 0.045;
       if (this.printProgress >= 1) {
         this.state = 'ready';
         this._setDisplay('ENTNEHMEN', '#ffd479');
       }
+    } else if (this.state === 'ready') {
+      // Fertiges Ticket kippt sanft nach vorn — signalisiert Entnahmebereitschaft
+      this.ticket.rotation.x += (-0.75 - this.ticket.rotation.x) * Math.min(1, dt * 5);
     }
   }
 }

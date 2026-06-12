@@ -2,8 +2,10 @@
 // (centerX(i, z) = Grundlinie + Sinus-Auslenkung), Ost-West-Straßen bleiben
 // gerade, folgen aber dem Hügel-Höhenfeld. Erzeugt
 // (a) Render-Meshes — Kurven-Strips mit eingemalten Markierungen,
-//     Kreuzungs-Patches, Gehweg-Strips — und
-// (b) den Fahrspur-Graphen (Polyline-Kanten inkl. Höhe) mit Abbiegern/Ampeln.
+//     Kreuzungs-Patches, an den Kreuzungen beschnittene Gehweg-Strips mit
+//     Eck-Patches, Zebrastreifen an signalisierten Kreuzungen —
+// (b) den Fahrspur-Graphen (Polyline-Kanten inkl. Höhe) mit Abbiegern/Ampeln,
+// (c) den Gehweg-Export this.sidewalkPaths für Fußgängersysteme.
 
 import * as THREE from 'three';
 import * as Mat from '../graphics/materials/MatLib.js';
@@ -14,6 +16,11 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 const KMH = 1 / 3.6;
 const CURB_H = 0.13;
 const SIDEWALK_W = 2.5;
+// Einheitliche Y-Lifts gegen Z-Fighting — EINE Quelle der Wahrheit:
+const ROAD_LIFT = 0.012;                                // alle Fahrbahn-Strips über Terrain
+const PATCH_LIFT = 0.022;                               // Kreuzungs-Patches über den Strips
+const CORNER_LIFT = CURB_H + (PATCH_LIFT - ROAD_LIFT);  // Gehweg-Ecken knapp über den Gehweg-Strips
+const ZEBRA_RAISE = 0.004;                              // Zebrastreifen über Patch/Fahrbahn
 
 // Markierungen in eine Kopie der Asphalt-Albedo malen.
 // Textur deckt die volle Straßenbreite (u) und 12 m Länge (v) ab.
@@ -124,6 +131,7 @@ export class RoadNetwork {
     this.plainMat = Mat.std({ ...plainTex, color: 0xffffff }, { wet: 'puddles' });
     const sideTex = sidewalkTextures(512, seed + 4);
     this.sidewalkMat = Mat.std({ ...sideTex, color: 0xffffff }, { wet: true });
+    this.zebraMat = Mat.std({ color: 0xdedbd2, roughness: 0.85 }, { wet: true });
 
     this._buildRoadMeshes();
     this._buildLaneGraph();
@@ -139,10 +147,23 @@ export class RoadNetwork {
   boundX(i) { return this.halfX[i] + 0.8; }
   boundZ(j) { return this.halfZ[j] + 0.8; }
 
+  // Schrittzahl ~8 m, an Steigungen verdichtet (Faktor 1 + |dy/dx|·8) —
+  // sonst schneidet die Sehne an Hügeln in das Terrain bzw. schwebt darüber.
+  _gradSteps(len, hA, hM, hB) {
+    const grad = Math.max(Math.abs(hM - hA), Math.abs(hB - hM)) / Math.max(1, len / 2);
+    return Math.max(2, Math.ceil((len / 8) * (1 + grad * 8)));
+  }
+
   // Mittellinien-Polyline eines NS-Segments (zA..zB), Schritt ~8 m, mit Höhe
-  _nsCenterline(i, zA, zB, lift = 0.01) {
+  _nsCenterline(i, zA, zB, lift = ROAD_LIFT) {
     const pts = [];
-    const steps = Math.max(2, Math.ceil((zB - zA) / 8));
+    const zM = (zA + zB) / 2;
+    const steps = this._gradSteps(
+      zB - zA,
+      this.terrain.hExact(this.centerX(i, zA), zA),
+      this.terrain.hExact(this.centerX(i, zM), zM),
+      this.terrain.hExact(this.centerX(i, zB), zB)
+    );
     for (let s = 0; s <= steps; s++) {
       const z = zA + ((zB - zA) * s) / steps;
       const x = this.centerX(i, z);
@@ -152,9 +173,15 @@ export class RoadNetwork {
   }
 
   // Gerade EW-Polyline (xA..xB bei z), mit Höhenprofil
-  _ewCenterline(xA, xB, z, lift = 0.01) {
+  _ewCenterline(xA, xB, z, lift = ROAD_LIFT) {
     const pts = [];
-    const steps = Math.max(2, Math.ceil((xB - xA) / 8));
+    const xM = (xA + xB) / 2;
+    const steps = this._gradSteps(
+      xB - xA,
+      this.terrain.hExact(xA, z),
+      this.terrain.hExact(xM, z),
+      this.terrain.hExact(xB, z)
+    );
     for (let s = 0; s <= steps; s++) {
       const x = xA + ((xB - xA) * s) / steps;
       pts.push(new THREE.Vector3(x, this.terrain.hExact(x, z) + lift, z));
@@ -182,15 +209,46 @@ export class RoadNetwork {
     return ns && ew;
   }
 
+  // Existiert am Knoten (i,j) der EW-Arm auf Seite sx (+1 = +x)?
+  _ewArm(i, j, sx) {
+    const row = this.segEW[j];
+    return sx > 0 ? i < row.length && !!row[i] : i > 0 && !!row[i - 1];
+  }
+
+  // Existiert am Knoten (i,j) der NS-Arm auf Seite sz (+1 = +z)?
+  _nsArm(i, j, sz) {
+    const col = this.segNS[i];
+    return sz > 0 ? j < col.length && !!col[j] : j > 0 && !!col[j - 1];
+  }
+
   _buildRoadMeshes() {
     const sidewalkGeos = [];
+    const zebraGeos = [];
+
+    // EXPORT für Fußgängersysteme:
+    //   this.sidewalkPaths = [ { pts: THREE.Vector3[] }, ... ]
+    // Jeder Eintrag ist die Mittellinie EINES Gehweg-Strips (Breite SIDEWALK_W,
+    // d.h. begehbar ±SIDEWALK_W/2 quer zur Polyline), an den Kreuzungen
+    // beschnitten (Grenze: bound + SIDEWALK_W vom Kreuzungsknoten). Beide
+    // Straßenseiten aller Segmente sind enthalten, Punktabstand ≤8 m,
+    // Punkt-y = Terrain + CURB_H (== groundHeight() auf dem Gehweg).
+    this.sidewalkPaths = [];
+
+    // Gehweg-Stück bauen: Strip-Geometrie + Mittellinie exportieren
+    const addWalk = (center, off) => {
+      const walkway = offsetPolyline(center, off);
+      sidewalkGeos.push(stripGeometry(walkway, SIDEWALK_W / 2, 1 / 2.5, CURB_H));
+      this.sidewalkPaths.push({
+        pts: walkway.map((p) => new THREE.Vector3(p.x, this.terrain.hExact(p.x, p.z) + CURB_H, p.z)),
+      });
+    };
 
     // ---- NS-Straßen: Kurven-Strips (zusammenhängende Läufe inkl. Kreuzungen)
     for (let i = 0; i < this.xs.length; i++) {
       for (const [j0, j1] of this._contiguousRuns(this.segNS[i])) {
         const z0 = this.zs[j0] - this.boundZ(j0);
         const z1 = this.zs[j1 + 1] + this.boundZ(j1 + 1);
-        const center = this._nsCenterline(i, z0, z1, 0.012);
+        const center = this._nsCenterline(i, z0, z1, ROAD_LIFT);
         const mesh = new THREE.Mesh(
           stripGeometry(center, this.halfX[i]),
           this.isAvenueX(i) ? this.avenueMat : this.streetMat
@@ -198,11 +256,20 @@ export class RoadNetwork {
         mesh.receiveShadow = true;
         this.group.add(mesh);
 
-        // Gehwege beidseitig entlang der Kurve
-        for (const side of [-1, 1]) {
-          const off = side * (this.halfX[i] + SIDEWALK_W / 2);
-          const walkway = offsetPolyline(center, off);
-          sidewalkGeos.push(stripGeometry(walkway, SIDEWALK_W / 2, 1 / 2.5, CURB_H));
+        // Gehwege beidseitig — pro Stück ZWISCHEN den Kreuzungen, an den
+        // Kreuzungsrändern beschnitten (sonst überlagern sie die Mündungen
+        // und Gehwege der Querstraße → Z-Fighting/Schweben). Fehlt der
+        // Quer-Arm auf dieser Seite (T-Kreuzung), läuft der Gehweg durch.
+        for (const sx of [-1, 1]) {
+          const off = sx * (this.halfX[i] + SIDEWALK_W / 2);
+          let zA = this._ewArm(i, j0, sx) ? this.zs[j0] + this.boundZ(j0) + SIDEWALK_W : z0;
+          for (let j = j0 + 1; j <= j1 + 1; j++) {
+            const clip = this._ewArm(i, j, sx);
+            if (!clip && j <= j1) continue; // keine Querstraße → durchlaufen
+            const zB = clip ? this.zs[j] - this.boundZ(j) - SIDEWALK_W : z1;
+            if (zB - zA > 1.2) addWalk(this._nsCenterline(i, zA, zB, ROAD_LIFT), off);
+            zA = this.zs[j] + this.boundZ(j) + SIDEWALK_W;
+          }
         }
       }
     }
@@ -210,10 +277,10 @@ export class RoadNetwork {
     // ---- EW-Straßen: gerade Strips zwischen den (verschobenen) Kreuzungen
     for (let j = 0; j < this.zs.length; j++) {
       for (const [i0, i1] of this._contiguousRuns(this.segEW[j])) {
-        const xA = this.centerX(i0, this.zs[j]) - this.boundX(i0);
-        const xB = this.centerX(i1 + 1, this.zs[j]) + this.boundX(i1 + 1);
-        if (xB <= xA) continue;
-        const center = this._ewCenterline(xA, xB, this.zs[j], 0.008);
+        const xA0 = this.centerX(i0, this.zs[j]) - this.boundX(i0);
+        const xB0 = this.centerX(i1 + 1, this.zs[j]) + this.boundX(i1 + 1);
+        if (xB0 <= xA0) continue;
+        const center = this._ewCenterline(xA0, xB0, this.zs[j], ROAD_LIFT);
         const mesh = new THREE.Mesh(
           stripGeometry(center, this.halfZ[j]),
           this.isAvenueZ(j) ? this.avenueMat : this.streetMat
@@ -221,23 +288,35 @@ export class RoadNetwork {
         mesh.receiveShadow = true;
         this.group.add(mesh);
 
-        for (const side of [-1, 1]) {
-          const off = side * (this.halfZ[j] + SIDEWALK_W / 2);
-          const walkway = offsetPolyline(center, off);
-          sidewalkGeos.push(stripGeometry(walkway, SIDEWALK_W / 2, 1 / 2.5, CURB_H));
+        // Gehwege je Seite: Clip-X an der NS-KURVE auf Gehweg-Höhe (zSide)
+        // messen, nicht auf zs[j] — sonst klafft an stark geschwungenen
+        // Querstraßen ein Spalt zur Ecke. offsetPolyline: offset>0 = -z.
+        for (const sz of [-1, 1]) {
+          const off = -sz * (this.halfZ[j] + SIDEWALK_W / 2);
+          const zSide = this.zs[j] + sz * (this.halfZ[j] + SIDEWALK_W / 2);
+          let xA = this._nsArm(i0, j, sz) ? this.centerX(i0, zSide) + this.boundX(i0) + SIDEWALK_W : xA0;
+          for (let i = i0 + 1; i <= i1 + 1; i++) {
+            const clip = this._nsArm(i, j, sz);
+            if (!clip && i <= i1) continue; // keine Querstraße → durchlaufen
+            const xB = clip ? this.centerX(i, zSide) - this.boundX(i) - SIDEWALK_W : xB0;
+            if (xB - xA > 1.2) addWalk(this._ewCenterline(xA, xB, this.zs[j], ROAD_LIFT), off);
+            xA = this.centerX(i, zSide) + this.boundX(i) + SIDEWALK_W;
+          }
         }
       }
     }
 
-    // ---- Kreuzungs-Patches (markierungsfrei, leicht erhöht gegen Z-Fighting)
+    // ---- Kreuzungen: Fahrbahn-Patch + vier Gehweg-Ecken + Zebrastreifen
     const patches = [];
     for (let i = 0; i < this.xs.length; i++) {
       for (let j = 0; j < this.zs.length; j++) {
         if (!this._intersectionExists(i, j)) continue;
         const cx = this.centerX(i, this.zs[j]);
         const cz = this.zs[j];
-        const w = this.halfX[i] * 2 + 1.2, d = this.halfZ[j] * 2 + 1.2;
-        const g = new THREE.PlaneGeometry(w, d, 2, 2);
+        // Patch deckt die Mündungs-Lücken: bound (+0.8) + 0.2 Reserve
+        const w = this.halfX[i] * 2 + 2 * (0.8 + 0.2);
+        const d = this.halfZ[j] * 2 + 2 * (0.8 + 0.2);
+        const g = new THREE.PlaneGeometry(w, d, 3, 3);
         g.rotateX(-Math.PI / 2);
         const uvA = g.attributes.uv;
         for (let k = 0; k < uvA.count; k++) {
@@ -246,10 +325,54 @@ export class RoadNetwork {
         const posA = g.attributes.position;
         for (let k = 0; k < posA.count; k++) {
           const px = posA.getX(k) + cx, pz = posA.getZ(k) + cz;
-          posA.setXYZ(k, px, this.terrain.hExact(px, pz) + 0.018, pz);
+          posA.setXYZ(k, px, this.terrain.hExact(px, pz) + PATCH_LIFT, pz);
         }
         g.computeVertexNormals();
         patches.push(g);
+
+        // Gehweg-Ecken: nur in Quadranten, in denen BEIDE Arme existieren
+        // (an T-Kreuzungen deckt der durchlaufende Gehweg die offene Seite ab)
+        for (const sx of [-1, 1]) {
+          for (const sz of [-1, 1]) {
+            if (this._nsArm(i, j, sz) && this._ewArm(i, j, sx)) {
+              sidewalkGeos.push(this._cornerPatchGeo(i, j, sx, sz));
+            }
+          }
+        }
+
+        // Zebrastreifen an signalisierten Kreuzungen: je vorhandener Mündung
+        // ein Streifenfeld auf der Zufahrt (Balken längs der Fahrtrichtung,
+        // 0.45 m breit, 2.6 m lang, 0.45 m Lücke)
+        if (this.signalized.has(`${i},${j}`)) {
+          for (const sz of [-1, 1]) { // Querung der NS-Straße
+            if (!this._nsArm(i, j, sz)) continue;
+            const zMid = cz + sz * (this.halfZ[j] + 1.6);
+            const cxB = this.centerX(i, zMid); // Feld an der Kurve ausrichten
+            const n = Math.max(2, Math.floor((2 * (this.halfX[i] - 0.35)) / 0.9));
+            const start = cxB - (n * 0.9 - 0.45) / 2;
+            const roadY = (px, pz) => this.terrain.hExact(this.centerX(i, pz), pz) + ROAD_LIFT;
+            for (let k = 0; k < n; k++) {
+              const x0 = start + k * 0.9;
+              zebraGeos.push(this._zebraQuad(x0, zMid - 1.3, x0 + 0.45, zMid + 1.3, roadY));
+            }
+          }
+          for (const sx of [-1, 1]) { // Querung der EW-Straße
+            if (!this._ewArm(i, j, sx)) continue;
+            // Dem Kurven-Bauch der NS-Straße ausweichen
+            let bulge = 0;
+            for (const zq of [cz - this.halfZ[j], cz + this.halfZ[j]]) {
+              bulge = Math.max(bulge, sx * (this.centerX(i, zq) - cx));
+            }
+            const xMid = cx + sx * (this.halfX[i] + 1.6 + bulge);
+            const n = Math.max(2, Math.floor((2 * (this.halfZ[j] - 0.35)) / 0.9));
+            const start = cz - (n * 0.9 - 0.45) / 2;
+            const roadY = (px) => this.terrain.hExact(px, cz) + ROAD_LIFT;
+            for (let k = 0; k < n; k++) {
+              const zq0 = start + k * 0.9;
+              zebraGeos.push(this._zebraQuad(xMid - 1.3, zq0, xMid + 1.3, zq0 + 0.45, roadY));
+            }
+          }
+        }
       }
     }
     if (patches.length) {
@@ -257,10 +380,59 @@ export class RoadNetwork {
       patchMesh.receiveShadow = true;
       this.group.add(patchMesh);
     }
+    if (zebraGeos.length) {
+      const zebra = new THREE.Mesh(mergeGeometries(zebraGeos), this.zebraMat);
+      zebra.receiveShadow = true;
+      this.group.add(zebra); // castShadow bewusst aus (flache Kleinteile)
+    }
 
     const sidewalks = new THREE.Mesh(mergeGeometries(sidewalkGeos), this.sidewalkMat);
     sidewalks.receiveShadow = true;
     this.group.add(sidewalks);
+  }
+
+  // Gehweg-Ecke an Kreuzung (i,j), Quadrant (sx,sz): kleines terrain-konformes
+  // Grid zwischen den Straßenmündungen, folgt der NS-Kurve via centerX. Liegt
+  // CORNER_LIFT über Terrain (= knapp über den Gehweg-Strips, die wie die
+  // Fahrbahn die Mittellinien-Höhe tragen) und überlappt die Strip-Enden
+  // bewusst leicht — gleiches Material, kein Z-Fighting dank Höhenabstand.
+  _cornerPatchGeo(i, j, sx, sz) {
+    const cz = this.zs[j];
+    const xIn = this.halfX[i] - 0.2;                              // bis an die Fahrbahnkante
+    const xOut = this.boundX(i) + SIDEWALK_W + 0.55;              // über das EW-Gehweg-Ende hinaus
+    const zIn = cz + sz * (this.halfZ[j] - 0.2);
+    const zOut = cz + sz * (this.boundZ(j) + SIDEWALK_W + 0.25);  // über das NS-Gehweg-Ende hinaus
+    const zLo = Math.min(zIn, zOut), zHi = Math.max(zIn, zOut);
+    const g = new THREE.PlaneGeometry(1, 1, 3, 3);
+    g.rotateX(-Math.PI / 2);
+    const pos = g.attributes.position, uvA = g.attributes.uv;
+    for (let k = 0; k < pos.count; k++) {
+      const tz = pos.getZ(k) + 0.5, tx = pos.getX(k) + 0.5;
+      const pz = zLo + (zHi - zLo) * tz;
+      const xl = xIn + (xOut - xIn) * (sx > 0 ? tx : 1 - tx); // Welt-x bleibt aufsteigend → Winding ok
+      const px = this.centerX(i, pz) + sx * xl;
+      pos.setXYZ(k, px, this.terrain.hExact(px, pz) + CORNER_LIFT, pz);
+      uvA.setXY(k, px / 2.5, pz / 2.5); // gleiche Kachelgröße wie die Gehweg-Strips
+    }
+    g.computeVertexNormals();
+    return g;
+  }
+
+  // Einzelner Zebra-Balken als terrain-/fahrbahnkonformes Quad. roadY(px,pz)
+  // liefert die Fahrbahnhöhe der gequerten Straße — der Balken liegt
+  // ZEBRA_RAISE über dem höheren von Patch- und Fahrbahnfläche.
+  _zebraQuad(x0, z0, x1, z1, roadY) {
+    const g = new THREE.PlaneGeometry(x1 - x0, z1 - z0, 1, 1);
+    g.rotateX(-Math.PI / 2);
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+    const pos = g.attributes.position;
+    for (let k = 0; k < pos.count; k++) {
+      const px = pos.getX(k) + cx, pz = pos.getZ(k) + cz;
+      const y = Math.max(this.terrain.hExact(px, pz) + PATCH_LIFT, roadY(px, pz)) + ZEBRA_RAISE;
+      pos.setXYZ(k, px, y, pz);
+    }
+    g.computeVertexNormals();
+    return g;
   }
 
   _laneOffsets(isAvenue) {

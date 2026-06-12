@@ -1,5 +1,5 @@
 import puppeteer from 'puppeteer-core';
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+import { CHROME, SHOT_DIR } from './_env.mjs';
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new',
   args: ['--window-size=1280,800', '--use-gl=angle', '--enable-unsafe-swiftshader', '--mute-audio'] });
 const page = await browser.newPage();
@@ -23,12 +23,12 @@ await page.evaluate(() => {
   };
 });
 await new Promise((r) => setTimeout(r, 5000));
-await page.screenshot({ path: '/tmp/bussim-shots/95-sky-overcast.png' });
+await page.screenshot({ path: `${SHOT_DIR}/95-sky-overcast.png` });
 await page.keyboard.press('Escape');
 await page.evaluate(() => document.querySelector('#weatherSeg button[data-v="clear"]').click());
 await page.keyboard.press('Escape');
 await new Promise((r) => setTimeout(r, 12000));
-await page.screenshot({ path: '/tmp/bussim-shots/96-sky-clear.png' });
+await page.screenshot({ path: `${SHOT_DIR}/96-sky-clear.png` });
 // Spiegel-Check aus Fahrersicht: Blick zum rechten Außenspiegel
 await page.evaluate(() => {
   delete window.game.cameraRig.update;
@@ -38,8 +38,8 @@ await page.evaluate(() => {
 });
 await page.keyboard.press('F1');
 await new Promise((r) => setTimeout(r, 800));
-await page.screenshot({ path: '/tmp/bussim-shots/97-mirror-right.png' });
+await page.screenshot({ path: `${SHOT_DIR}/97-mirror-right.png` });
 await page.evaluate(() => { window.game.input.lookYaw = 0.75; });
 await new Promise((r) => setTimeout(r, 500));
-await page.screenshot({ path: '/tmp/bussim-shots/98-mirror-left.png' });
+await page.screenshot({ path: `${SHOT_DIR}/98-mirror-left.png` });
 await browser.close();

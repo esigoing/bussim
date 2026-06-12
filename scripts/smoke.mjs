@@ -2,10 +2,9 @@
 // sammelt Konsolenfehler und macht Screenshots.
 
 import puppeteer from 'puppeteer-core';
+import { CHROME, SHOT_DIR } from './_env.mjs';
 
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const URL = process.env.URL || 'http://localhost:5173/?seed=73';
-const SHOT_DIR = '/tmp/bussim-shots';
 
 const browser = await puppeteer.launch({
   executablePath: CHROME,

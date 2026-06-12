@@ -20,8 +20,15 @@ export class ICUDisplay {
 
     this.nextStop = '—';
     this.odometer = 48213.4; // km
+    this.delay = null;       // Fahrplan-Abweichung in Sekunden (+ = zu spät)
     this._accum = 0;
     this._draw({ gearLabel: 'N', speed: 0, time: '10:30', warnings: [] });
+  }
+
+  // Platzhalter-API fürs Fahrplan-System: Sekunden (+verspätet/−verfrüht)
+  // oder null = keine Anzeige.
+  setDelay(seconds) {
+    this.delay = seconds;
   }
 
   update(dt, bus, timeOfDay) {
@@ -50,10 +57,12 @@ export class ICUDisplay {
       rpm: Math.round(bus.engine.rpm / 10) * 10,
       time,
       warnings,
+      retarder: bus.retarderLevel || 0,
+      retarderActive: !!bus.retarderActive,
     });
   }
 
-  _draw({ gearLabel, speed, rpm = 0, time, warnings }) {
+  _draw({ gearLabel, speed, rpm = 0, time, warnings, retarder = 0, retarderActive = false }) {
     const { ctx, canvas } = this;
     const W = canvas.width, H = canvas.height;
 
@@ -70,11 +79,27 @@ export class ICUDisplay {
     ctx.textAlign = 'right';
     ctx.fillText(time, W - 10, 21);
 
+    // Fahrplan-Abweichung mittig im Kopf: '+2:30' (zu spät) / '-0:45' (zu früh)
+    if (this.delay !== null && this.delay !== undefined) {
+      const s = Math.round(Math.abs(this.delay));
+      const txt = `${this.delay < 0 ? '-' : '+'}${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+      ctx.fillStyle = this.delay > 0 ? '#ff8b7d' : '#8fe39b';
+      ctx.textAlign = 'center';
+      ctx.fillText(txt, W / 2, 21);
+    }
+
     // Gang groß
     ctx.fillStyle = '#7fd4ff';
     ctx.font = 'bold 52px Arial';
     ctx.textAlign = 'left';
     ctx.fillText(gearLabel, 14, 92);
+
+    // Retarder-Stufe unter dem Gang (hell, wenn er gerade bremst)
+    if (retarder > 0) {
+      ctx.fillStyle = retarderActive ? '#ffae42' : '#8a7340';
+      ctx.font = 'bold 16px Arial';
+      ctx.fillText(`RET ${retarder}`, 14, 112);
+    }
 
     // Geschwindigkeit digital + Drehzahl
     ctx.fillStyle = '#e8eef4';

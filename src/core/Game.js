@@ -263,8 +263,10 @@ export class Game {
 
     // ---------- HUD + Minimap
     this.hud.update(dt, this.bus);
+    // Pfeil zeigt in Fahrtrichtung: -Z ist vorn, Canvas-Dreieck zeigt nach
+    // oben (-y) → Yaw direkt übergeben (Minimap negiert beim Zeichnen).
     const e = new THREE.Euler().setFromQuaternion(g.quaternion, 'YXZ');
-    this.minimap.update(body.position, e.y + Math.PI, this.nextStop);
+    this.minimap.update(body.position, e.y, this.nextStop);
 
     // ---------- Render: erst Spiegel, dann Hauptbild
     this.renderer.info.reset();

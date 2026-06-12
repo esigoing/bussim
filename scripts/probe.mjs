@@ -1,8 +1,8 @@
 // Laufzeit-Diagnose: Schatten, Draw Calls, Lichter, Materialien.
 
 import puppeteer from 'puppeteer-core';
+import { CHROME } from './_env.mjs';
 
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const browser = await puppeteer.launch({
   executablePath: CHROME,
   headless: 'new',

@@ -2,8 +2,8 @@
 // Einstieg + Ticketverkauf am Drucker durchspielen, Sitzplatz prüfen.
 
 import puppeteer from 'puppeteer-core';
+import { CHROME, SHOT_DIR } from './_env.mjs';
 
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const browser = await puppeteer.launch({
   executablePath: CHROME,
   headless: 'new',
@@ -44,7 +44,7 @@ console.log('SETUP:', JSON.stringify(setup));
 await new Promise((r) => setTimeout(r, 700));
 await page.keyboard.press('Digit1');
 await new Promise((r) => setTimeout(r, 3000));
-await page.screenshot({ path: '/tmp/bussim-shots/30-door-open.png' });
+await page.screenshot({ path: `${SHOT_DIR}/30-door-open.png` });
 
 // Einstieg über max. 40 s beobachten, Ticketwünsche am Drucker bedienen
 let lastLog = '';
@@ -79,12 +79,12 @@ for (let t = 0; t < 40; t++) {
   if (st.aboard >= setup.waiting && st.seated === st.aboard && !st.ticketActive && st.boarder === null && st.queue === 0 && st.aboard > 0) break;
 }
 
-await page.screenshot({ path: '/tmp/bussim-shots/31-boarded.png' });
+await page.screenshot({ path: `${SHOT_DIR}/31-boarded.png` });
 
 // Innenraum-Kamera: sitzen die Fahrgäste?
 await page.keyboard.press('F4');
 await new Promise((r) => setTimeout(r, 600));
-await page.screenshot({ path: '/tmp/bussim-shots/32-cabin.png' });
+await page.screenshot({ path: `${SHOT_DIR}/32-cabin.png` });
 
 // Haltewunsch-Logik: nächster Halt = Ziel eines Fahrgasts simulieren
 const stopReq = await page.evaluate(() => {
