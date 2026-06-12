@@ -15,11 +15,17 @@ export class SteeringColumn {
     const rimMat = new THREE.MeshStandardMaterial({ color: 0x17181a, roughness: 0.45 });
     const columnMat = dashMat || new THREE.MeshStandardMaterial({ color: 0x222326, roughness: 0.6 });
 
-    // Säule: Fuß vorn unten, Kopf hinten oben beim Fahrer
-    const column = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.055, 0.45, 12), columnMat);
+    // Säule: läuft vom Radnaben-Punkt (lokaler Ursprung) schräg nach
+    // vorn-unten bis in den Konsolenkörper — Rad darf nicht frei schweben.
+    const column = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.06, 0.9, 12), columnMat);
     column.rotation.x = this.tilt;
-    column.position.set(0, -0.18, 0.14);
+    column.position.set(0, -0.262, -0.366);
     this.group.add(column);
+    // Manschette am Säulenfuß kaschiert den Übergang in die Konsole
+    const boot = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.09, 0.16, 12), columnMat);
+    boot.rotation.x = this.tilt;
+    boot.position.set(0, -0.46, -0.64);
+    this.group.add(boot);
 
     // Radgruppe: lokale +z-Normale zeigt zum Fahrer (oben-hinten)
     this.wheelGroup = new THREE.Group();

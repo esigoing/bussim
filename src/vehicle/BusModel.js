@@ -5,6 +5,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import * as Mat from '../graphics/materials/MatLib.js';
+import { Events } from '../core/Events.js';
 import {
   busPaintTextures, rubberTextures, metalTextures, seatFabricTextures,
   busFloorTextures, dashPlasticTextures,
@@ -55,6 +56,25 @@ export function makeMatrixDisplay(text, w = 512, h = 96, color = '#ffb02e') {
   return tex;
 }
 
+// Schriftzug (z. B. „SCANIA") als transparente Canvas-Textur
+function makeLogoTexture(text) {
+  const c = document.createElement('canvas');
+  c.width = 512;
+  c.height = 64;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, c.width, c.height);
+  ctx.fillStyle = '#dfe3e8';
+  ctx.font = 'bold italic 52px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.letterSpacing = '14px';
+  ctx.fillText(text, c.width / 2, c.height / 2 + 2);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
 export class BusModel {
   constructor(bus) {
     this.bus = bus;
@@ -68,9 +88,18 @@ export class BusModel {
     this._buildLights();
     this._buildInterior();
     this._buildMirrorMounts();
+    this._buildExteriorDetails();
+    this._buildInteriorDetails();
 
+    // Fahrerfenster-Schiebescheibe: Zustand 0 (zu) … 1 (offen).
+    // API: setDriverWindow()/toggleDriverWindow(), Event 'windowSlide'.
+    this.driverWindowTarget = 0;
+    this.driverWindowProgress = 0;
+
+    // Kleinteile (userData.smallDetail) werfen/empfangen keine Schatten —
+    // sonst explodieren die Schattenkosten durch die vielen Detail-Meshes.
     this.group.traverse((o) => {
-      if (o.isMesh) {
+      if (o.isMesh && !o.userData.smallDetail) {
         o.castShadow = true;
         o.receiveShadow = true;
       }
@@ -231,7 +260,9 @@ export class BusModel {
     frameTop.position.set(0, GROUND_Y + 2.82, FRONT_Z + 0.03);
     this.group.add(frameTop);
 
-    // Zielanzeige
+    // Zielanzeige — Gehäuse flach (Tiefe 0.06), durchdringt die Frontkappe
+    // nicht mehr (Rückseite bleibt vor der geneigten Windschutzscheibe)
+    this._shownDestination = 'Hauptbahnhof';
     const destTex = makeMatrixDisplay('73  Hauptbahnhof');
     this.destDisplay = new THREE.Mesh(
       new THREE.PlaneGeometry(1.7, 0.3),
@@ -241,23 +272,35 @@ export class BusModel {
     this.destDisplay.rotation.y = Math.PI;
     this.destDisplay.castShadow = false;
     this.group.add(this.destDisplay);
-    const destHousing = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.38, 0.1), this.trimMat);
-    destHousing.position.set(0, GROUND_Y + 2.62, FRONT_Z + 0.0);
+    const destHousing = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.38, 0.06), this.trimMat);
+    destHousing.position.set(0, GROUND_Y + 2.62, FRONT_Z - 0.025);
     this.group.add(destHousing);
 
-    // Seitliche & hintere Liniennummer
+    // Seitliche Liniennummer: Anzeigekasten INNEN hinter der Scheibe
+    // (x=1.218) — vorher steckte die Plane im Glasband (1.245…1.285)
     const sideNumTex = makeMatrixDisplay('73', 128, 64);
     const sideNum = new THREE.Mesh(
       new THREE.PlaneGeometry(0.3, 0.15),
       new THREE.MeshBasicMaterial({ map: sideNumTex, toneMapped: false })
     );
-    sideNum.position.set(HALF_W + 0.002, GROUND_Y + 2.3, -3.4);
+    sideNum.position.set(1.218, GROUND_Y + 2.3, -3.4);
     sideNum.rotation.y = Math.PI / 2;
+    sideNum.userData.smallDetail = true;
     this.group.add(sideNum);
+    const sideNumBox = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.2, 0.36), this.trimMat);
+    sideNumBox.position.set(1.199, GROUND_Y + 2.3, -3.4);
+    sideNumBox.userData.smallDetail = true;
+    this.group.add(sideNumBox);
+    // Heck-Liniennummer: vor die Kappenfläche (z=6.035 statt 6.002 < 6.005),
+    // leicht angehoben — bleibt frei vom neuen Heckscheiben-Rahmen
     const backNum = sideNum.clone();
-    backNum.position.set(0.6, GROUND_Y + 2.45, BACK_Z + 0.002);
+    backNum.position.set(0.6, GROUND_Y + 2.53, BACK_Z + 0.035);
     backNum.rotation.y = 0;
     this.group.add(backNum);
+    const backNumBox = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.2, 0.03), this.trimMat);
+    backNumBox.position.set(0.6, GROUND_Y + 2.53, BACK_Z + 0.018);
+    backNumBox.userData.smallDetail = true;
+    this.group.add(backNumBox);
 
     // Kühlergrill / Scania-Front (schwarzes Panel unten an der Front)
     const grille = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.32, 0.06), this.trimMat);
@@ -269,9 +312,10 @@ export class BusModel {
     ac.position.set(0, ROOF_Y + 0.15, 1.0);
     this.group.add(ac);
 
-    // Wischerarme (2) — rotieren in update()
+    // Wischerarme (2) — rotieren in update(). Rechter Pivot weiter innen,
+    // sonst ragt der liegende Arm über die rechte Scheibenkante hinaus.
     this.wiperPivots = [];
-    for (const wx of [-0.62, 0.55]) {
+    for (const wx of [-0.62, 0.3]) {
       const pivot = new THREE.Group();
       pivot.position.set(wx, GROUND_Y + 1.18, FRONT_Z - 0.04);
       const arm = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.95, 0.02), this.trimMat);
@@ -279,7 +323,7 @@ export class BusModel {
       const blade = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.78, 0.015), this.rubberMat);
       blade.position.set(0.04, 0.62, 0);
       pivot.add(arm, blade);
-      pivot.rotation.z = -1.2; // Parkstellung: liegend am Scheibenfuß
+      pivot.rotation.z = -1.5; // Parkstellung: fast waagerecht am Scheibenfuß
       this.group.add(pivot);
       this.wiperPivots.push(pivot);
     }
@@ -289,8 +333,10 @@ export class BusModel {
     // Durchgehendes Fensterband beidseitig + Heckscheibe.
     const bandY = GROUND_Y + 1.95;
     const bandH = 1.05;
-    const winL = new THREE.Mesh(new THREE.BoxGeometry(0.04, bandH, 11.2), this.glassMat);
-    winL.position.set(-HALF_W + 0.01, bandY, 0.15);
+    // links: Band beginnt erst hinter dem Fahrerfenster (z ≥ -4.2) —
+    // davor sitzt die eigene Fahrerfenster-Einheit mit Schiebescheibe
+    const winL = new THREE.Mesh(new THREE.BoxGeometry(0.04, bandH, 9.95), this.glassMat);
+    winL.position.set(-HALF_W + 0.01, bandY, 0.775);
     winL.castShadow = false;
     this.group.add(winL);
     // rechts: Band ausgespart an den Türen → drei Segmente
@@ -301,9 +347,13 @@ export class BusModel {
       m.castShadow = false;
       this.group.add(m);
     }
-    // Fensterband vorn links neben der Windschutzscheibe bis Tür 1 hinten
+    // Heckscheibe: VOR der opaken Heckkappe (z=6.03) mit Trim-Rahmen —
+    // vorher lag sie unsichtbar komplett im Kappenvolumen
+    const backWinFrame = new THREE.Mesh(new THREE.BoxGeometry(1.98, 0.94, 0.04), this.trimMat);
+    backWinFrame.position.set(0, bandY, BACK_Z + 0.012);
+    this.group.add(backWinFrame);
     const backWin = new THREE.Mesh(new THREE.BoxGeometry(1.9, bandH * 0.8, 0.04), this.glassMat);
-    backWin.position.set(0, bandY, BACK_Z - 0.015);
+    backWin.position.set(0, bandY, BACK_Z + 0.03);
     backWin.castShadow = false;
     this.group.add(backWin);
 
@@ -313,6 +363,65 @@ export class BusModel {
       post.position.set(-HALF_W + 0.02, bandY, z);
       this.group.add(post);
     }
+
+    this._buildDriverWindow(bandY, bandH);
+  }
+
+  // Fahrerfenster links (z −5.71…−4.20): Rahmen mit Ober-/Untergurt,
+  // Pfosten und Mittelteiler, feste hintere Scheibe und schiebbare
+  // vordere Scheibe (30 mm nach innen versetzt, Hub 0.62 m nach hinten).
+  _buildDriverWindow(bandY, bandH) {
+    const frameX = -(HALF_W - 0.015);
+    const z0 = -5.71, z1 = -4.20, zm = (z0 + z1) / 2; // Mittelteiler bei -4.955
+    const len = z1 - z0;
+
+    const gurtGeo = new THREE.BoxGeometry(0.06, 0.06, len);
+    const gurtTop = new THREE.Mesh(gurtGeo, this.trimMat);
+    gurtTop.position.set(frameX, bandY + bandH / 2 - 0.03, zm);
+    const gurtBottom = new THREE.Mesh(gurtGeo, this.trimMat);
+    gurtBottom.position.set(frameX, bandY - bandH / 2 + 0.03, zm);
+    const postGeo = new THREE.BoxGeometry(0.06, bandH, 0.06);
+    const postF = new THREE.Mesh(postGeo, this.trimMat);
+    postF.position.set(frameX, bandY, z0 + 0.03);
+    const postB = new THREE.Mesh(postGeo, this.trimMat);
+    postB.position.set(frameX, bandY, z1 - 0.03);
+    // Mittelteiler außen — die Schiebescheibe läuft innen daran vorbei
+    const divider = new THREE.Mesh(new THREE.BoxGeometry(0.03, bandH - 0.08, 0.05), this.trimMat);
+    divider.position.set(-(HALF_W - 0.003), bandY, zm);
+    this.group.add(gurtTop, gurtBottom, postF, postB, divider);
+
+    // feste hintere Scheibe (klares Glas — Sichtachse zum linken Spiegel!)
+    const fixedPane = new THREE.Mesh(new THREE.BoxGeometry(0.03, bandH - 0.12, 0.70), this.windshieldMat);
+    fixedPane.position.set(-1.268, bandY, -4.60);
+    fixedPane.castShadow = false;
+    fixedPane.userData.smallDetail = true;
+    this.group.add(fixedPane);
+
+    // Schiebescheibe: 30 mm nach innen versetzt, gleitet hinter die feste
+    // Scheibe (update(): driverWinSlider.position.z = progress * 0.62)
+    this.driverWinSlider = new THREE.Group();
+    // Höhe bündig zu den Gurt-Innenflächen — Scheibe läuft wie in einer Schiene
+    const slidePane = new THREE.Mesh(new THREE.BoxGeometry(0.025, bandH - 0.12, 0.76), this.windshieldMat);
+    slidePane.position.set(-1.235, bandY, -5.33);
+    slidePane.castShadow = false;
+    slidePane.userData.smallDetail = true;
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.10, 0.03), this.trimMat);
+    grip.position.set(-1.219, bandY, -5.02);
+    grip.userData.smallDetail = true;
+    this.driverWinSlider.add(slidePane, grip);
+    this.group.add(this.driverWinSlider);
+  }
+
+  // --- Fahrerfenster-API (Cockpit-Klickzone und Taste G rufen das auf)
+  setDriverWindow(target) {
+    const t = Math.min(1, Math.max(0, target));
+    if (t === this.driverWindowTarget) return;
+    this.driverWindowTarget = t;
+    Events.emit('windowSlide', { opening: t > this.driverWindowProgress });
+  }
+
+  toggleDriverWindow() {
+    this.setDriverWindow(this.driverWindowTarget > 0.5 ? 0 : 1);
   }
 
   _buildDoors() {
@@ -338,7 +447,16 @@ export class BusModel {
         glass.castShadow = false;
         const edge = new THREE.Mesh(new THREE.BoxGeometry(0.06, doorH, 0.04), this.rubberMat);
         edge.position.set(0, 0, dir * (leafW - 0.02));
-        pivot.add(panel, glass, edge);
+        // Akzentstreifen auf dem Flügel: fluchtet mit dem Rumpfstreifen
+        // (GROUND_Y+1.18) und schwenkt am Tür-Pivot mit
+        const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.16, leafW - 0.10), this.accentMat);
+        stripe.position.set(0.033, GROUND_Y + 1.18 - doorY, dir * leafW / 2);
+        stripe.userData.smallDetail = true;
+        // Türgriff-Stange innen (gelber Haltegriff je Flügel, schwenkt mit)
+        const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.95, 8), this.poleMat);
+        handle.position.set(-0.06, -0.1, dir * leafW * 0.55);
+        handle.userData.smallDetail = true;
+        pivot.add(panel, glass, edge, stripe, handle);
         pivot.userData.dir = dir;
         this.group.add(pivot);
         pair.push(pivot);
@@ -523,11 +641,24 @@ export class BusModel {
     signHousing.position.set(0, ROOF_Y - 0.72, -3.63);
     this.group.add(signHousing);
 
-    // Fahrerabtrennung hinter dem Fahrerplatz
-    const partition = new THREE.Mesh(new THREE.BoxGeometry(0.04, 1.4, 1.0), this.glassMat);
-    partition.position.set(-0.62, FLOOR_Y + 1.05, -4.0);
-    partition.castShadow = false;
-    this.group.add(partition);
+    // Fahrerabtrennung: Querwand HINTER dem Fahrerplatz (z=-4.05) —
+    // Paneel unten, Glas oben, Rahmenpfosten an der freien Kante.
+    // Die alte Längswand bei x=-0.62 schnitt die Sitz-Kopfstütze (z≈-4.3);
+    // jetzt 0.2 m Abstand. Einstiegspfad rechts der Kante x=-0.035 bleibt
+    // weit über 0.28 m frei (Tür 1 → Gang).
+    const partWall = new THREE.Mesh(new THREE.BoxGeometry(1.14, 1.10, 0.05), this.innerWallMat);
+    partWall.position.set(-0.65, FLOOR_Y + 0.55, -4.05);
+    this.group.add(partWall);
+    const partGlass = new THREE.Mesh(new THREE.BoxGeometry(1.14, 0.85, 0.03), this.glassMat);
+    partGlass.position.set(-0.65, FLOOR_Y + 1.51, -4.05);
+    partGlass.castShadow = false;
+    this.group.add(partGlass);
+    const partPost = new THREE.Mesh(new THREE.BoxGeometry(0.05, 1.95, 0.07), this.seatFrameMat);
+    partPost.position.set(-0.06, FLOOR_Y + 0.975, -4.05);
+    this.group.add(partPost);
+    const partTop = new THREE.Mesh(new THREE.BoxGeometry(1.14, 0.05, 0.07), this.seatFrameMat);
+    partTop.position.set(-0.65, FLOOR_Y + 1.955, -4.05);
+    this.group.add(partTop);
   }
 
   _buildSeats() {
@@ -556,7 +687,10 @@ export class BusModel {
     this.seatInst = new THREE.InstancedMesh(shellGeo, this.seatMat, seatPositions.length);
     const m = new THREE.Matrix4();
     seatPositions.forEach(([x, z], i) => {
-      const seatY = FLOOR_Y + (Math.abs(z) > 3 || z > 0.9 ? 0.35 : 0.12); // Podest hinten
+      // Reihen über den Radkästen (Boxen z ±2.25…3.70, Oberkante FLOOR_Y+0.43):
+      // Beine standen im Kasten → auf Kastendeckel-Podest FLOOR_Y+0.45 (+0.10)
+      const overArch = Math.abs(Math.abs(z) - WHEELBASE / 2) < 0.94;
+      const seatY = FLOOR_Y + (overArch ? 0.45 : (Math.abs(z) > 3 || z > 0.9 ? 0.35 : 0.12));
       m.makeTranslation(x, seatY, z);
       this.seatInst.setMatrixAt(i, m);
       this.seatWorldSlots.push({
@@ -629,28 +763,209 @@ export class BusModel {
     this.mirrorAnchors = {};
     const housingGeo = new RoundedBoxGeometry(0.06, 0.4, 0.25, 2, 0.03);
 
+    // Gehäuse 10 cm Richtung Heck gerückt und deutlich zum Fahrer gedreht —
+    // vorher verdeckte die unrotierte Gehäusekante das Glas aus Fahrersicht
+    // (Spieltest-Feedback). Glas-Anker liegt 5,5 cm vor dem Gehäusezentrum
+    // entlang der GEDREHTEN Frontnormale; die Spiegelfläche selbst richtet
+    // Mirrors.js exakt aufs Fahrerauge aus.
+    const MIRROR_TURN = 0.7;
+
     // links: klassischer Auslegerspiegel
     const armL = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.5, 8), this.trimMat);
     armL.rotation.z = Math.PI / 2.4;
-    armL.position.set(-HALF_W - 0.2, GROUND_Y + 2.45, FRONT_Z + 0.15);
+    armL.position.set(-HALF_W - 0.2, GROUND_Y + 2.45, FRONT_Z + 0.25);
     this.group.add(armL);
     const houseL = new THREE.Mesh(housingGeo, this.trimMat);
-    houseL.position.set(-HALF_W - 0.4, GROUND_Y + 2.2, FRONT_Z + 0.12);
+    houseL.position.set(-HALF_W - 0.4, GROUND_Y + 2.2, FRONT_Z + 0.22);
+    houseL.rotation.y = -MIRROR_TURN;
     this.group.add(houseL);
-    this.mirrorAnchors.left = { pos: new THREE.Vector3(-HALF_W - 0.37, GROUND_Y + 2.2, FRONT_Z + 0.12), yaw: 0.32, pitch: -0.04 };
+    const glassL = houseL.position.clone().addScaledVector(
+      new THREE.Vector3(Math.cos(MIRROR_TURN), 0, Math.sin(MIRROR_TURN)), 0.055);
+    this.mirrorAnchors.left = { pos: glassL, yaw: -MIRROR_TURN, pitch: -0.04 };
 
     // rechts
     const armR = armL.clone();
     armR.rotation.z = -Math.PI / 2.4;
     armR.position.x = HALF_W + 0.2;
     this.group.add(armR);
-    const houseR = houseL.clone();
-    houseR.position.x = HALF_W + 0.4;
+    const houseR = new THREE.Mesh(housingGeo, this.trimMat);
+    houseR.position.set(HALF_W + 0.4, GROUND_Y + 2.2, FRONT_Z + 0.22);
+    houseR.rotation.y = MIRROR_TURN;
     this.group.add(houseR);
-    this.mirrorAnchors.right = { pos: new THREE.Vector3(HALF_W + 0.37, GROUND_Y + 2.2, FRONT_Z + 0.12), yaw: -0.32, pitch: -0.04 };
+    const glassR = houseR.position.clone().addScaledVector(
+      new THREE.Vector3(-Math.cos(MIRROR_TURN), 0, Math.sin(MIRROR_TURN)), 0.055);
+    this.mirrorAnchors.right = { pos: glassR, yaw: MIRROR_TURN, pitch: -0.04 };
 
     // Innenspiegel über Tür 1 (Fahrgastraum-Blick)
     this.mirrorAnchors.interior = { pos: new THREE.Vector3(0.55, ROOF_Y - 0.75, -4.6), yaw: Math.PI - 0.35, pitch: -0.35 };
+  }
+
+  // Lamellengitter: Grundplatte + horizontale Lamellen, gemergt (1 Draw-Call).
+  // Liegt in der XY-Ebene, Vorderseite +Z — per rotation.y ausrichten.
+  _grilleGeo(w, h, slats) {
+    const geos = [];
+    const plate = new THREE.BoxGeometry(w, h, 0.012).toNonIndexed();
+    plate.translate(0, 0, -0.008);
+    geos.push(plate);
+    const pitch = h / slats;
+    for (let i = 0; i < slats; i++) {
+      const slat = new THREE.BoxGeometry(w - 0.06, pitch * 0.55, 0.016).toNonIndexed();
+      slat.translate(0, -h / 2 + (i + 0.5) * pitch, 0.004);
+      geos.push(slat);
+    }
+    return mergeGeometriesCompat(geos);
+  }
+
+  // Außendetails — alles Kleinteile: userData.smallDetail hält sie aus dem
+  // Schatten-Traverse heraus (Schattenkosten!)
+  _buildExteriorDetails() {
+    const small = (m) => { m.userData.smallDetail = true; return m; };
+
+    // Radlauf-Zierringe (Chrom-Halbringe) + Schmutzfänger hinter jedem Rad.
+    // Rechts hinten nur Teilbogen: der volle Ring (Radius 0.65) würde sonst
+    // in die Türöffnung von Tür 3 (z ≥ 3.1) hineinragen.
+    const ringGeo = new THREE.TorusGeometry(WHEEL_R + 0.17, 0.018, 8, 28, Math.PI);
+    ringGeo.rotateY(Math.PI / 2);
+    const ringGeoShort = new THREE.TorusGeometry(WHEEL_R + 0.17, 0.018, 8, 20, 1.7);
+    ringGeoShort.rotateY(Math.PI / 2);
+    const flapGeo = new THREE.BoxGeometry(0.42, 0.16, 0.025);
+    for (const sx of [-1, 1]) {
+      for (const z of [-WHEELBASE / 2, WHEELBASE / 2]) {
+        const isDoorSide = sx > 0 && z > 0;
+        const ring = new THREE.Mesh(isDoorSide ? ringGeoShort : ringGeo, this.rimMat);
+        ring.position.set(sx * (HALF_W + 0.001), -0.85, z);
+        this.group.add(small(ring));
+        const flap = new THREE.Mesh(flapGeo, this.rubberMat);
+        flap.position.set(sx * 1.05, -1.14, z + 0.62);
+        this.group.add(small(flap));
+      }
+    }
+
+    // Zwei Dachluken — frei von der Klimaanlage (AC belegt z −0.8…2.8)
+    for (const z of [-3.2, 4.6]) {
+      const base = new THREE.Mesh(new RoundedBoxGeometry(0.55, 0.07, 0.55, 2, 0.02), this.skirtMat);
+      base.position.set(0, ROOF_Y + 0.035, z);
+      const lid = new THREE.Mesh(new RoundedBoxGeometry(0.45, 0.05, 0.45, 2, 0.02), this.trimMat);
+      lid.position.set(0, ROOF_Y + 0.08, z);
+      this.group.add(small(base), small(lid));
+    }
+
+    // Funkantenne + GPS-Dom auf dem Dach
+    const antMast = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.011, 0.42, 6), this.trimMat);
+    antMast.position.set(0.4, ROOF_Y + 0.21, -4.6);
+    const antFoot = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.05, 0.05, 10), this.trimMat);
+    antFoot.position.set(0.4, ROOF_Y + 0.025, -4.6);
+    const domeMat = Mat.std({ color: 0xe0e3e6, roughness: 0.45 });
+    const gpsDome = new THREE.Mesh(
+      new THREE.SphereGeometry(0.075, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), domeMat
+    );
+    gpsDome.position.set(-0.45, ROOF_Y - 0.005, -3.9);
+    this.group.add(small(antMast), small(antFoot), small(gpsDome));
+
+    // Heck-Motorgrill mit Lamellen + Seiten-Lüftungsgitter (Motorraum)
+    const rearGrille = new THREE.Mesh(this._grilleGeo(1.4, 0.5, 6), this.skirtMat);
+    rearGrille.position.set(0, -0.45, BACK_Z + 0.015);
+    this.group.add(small(rearGrille));
+    const ventGeo = this._grilleGeo(0.55, 0.25, 4);
+    const ventL = new THREE.Mesh(ventGeo, this.skirtMat);
+    ventL.position.set(-HALF_W, -0.35, 4.95);
+    ventL.rotation.y = -Math.PI / 2;
+    const ventR = new THREE.Mesh(ventGeo, this.skirtMat);
+    ventR.position.set(HALF_W, -0.35, 5.0);
+    ventR.rotation.y = Math.PI / 2;
+    this.group.add(small(ventL), small(ventR));
+
+    // Scania-Badge (vorn am Grill) + Schriftzug vorn/hinten
+    const badgeGeo = new THREE.CylinderGeometry(0.075, 0.075, 0.014, 20);
+    badgeGeo.rotateX(Math.PI / 2);
+    const badge = new THREE.Mesh(badgeGeo, this.rimMat);
+    badge.position.set(0, GROUND_Y + 0.85, FRONT_Z - 0.046);
+    this.group.add(small(badge));
+    const logoMat = new THREE.MeshBasicMaterial({ map: makeLogoTexture('SCANIA'), transparent: true });
+    // vorn auf der flachen Grillfläche (Frontkappe ist an den Kanten gerundet)
+    const logoF = new THREE.Mesh(new THREE.PlaneGeometry(0.45, 0.06), logoMat);
+    logoF.position.set(0, GROUND_Y + 0.96, FRONT_Z - 0.045);
+    logoF.rotation.y = Math.PI;
+    const logoB = new THREE.Mesh(new THREE.PlaneGeometry(0.45, 0.06), logoMat);
+    logoB.position.set(0, GROUND_Y + 1.25, BACK_Z + 0.012);
+    this.group.add(small(logoF), small(logoB));
+
+    // Abschleppösen-Deckel (rund, lackiert) in den Stoßfängern
+    const towGeo = new THREE.CylinderGeometry(0.045, 0.045, 0.014, 14);
+    towGeo.rotateX(Math.PI / 2);
+    for (const [x, z] of [[-0.95, FRONT_Z - 0.037], [0.95, FRONT_Z - 0.037], [0.95, BACK_Z + 0.037]]) {
+      const cap = new THREE.Mesh(towGeo, this.paintMat);
+      cap.position.set(x, GROUND_Y + 0.38, z);
+      this.group.add(small(cap));
+    }
+
+    // Schürzen-Panelfugen: dunkle Falze auf beiden Seitenwänden (1 Mesh)
+    const seamGeos = [];
+    for (const z of [-3.2, -1.9, 1.5, 2.5]) {
+      for (const sx of [-1, 1]) {
+        const g = new THREE.BoxGeometry(0.012, 1.0, 0.018).toNonIndexed();
+        g.translate(sx * 1.272, GROUND_Y + 0.845, z);
+        seamGeos.push(g);
+      }
+    }
+    const seams = new THREE.Mesh(mergeGeometriesCompat(seamGeos), this.trimMat);
+    this.group.add(small(seams));
+  }
+
+  // Innendetails: Halteschlaufen, Entwerter, Armaturen-Seitenverkleidung
+  _buildInteriorDetails() {
+    const small = (m) => { m.userData.smallDetail = true; return m; };
+
+    // 14 Halteschlaufen an den Deckenstangen (InstancedMesh, 1 Draw-Call).
+    // Hängen bei x=±0.6 — außerhalb des Gang-Korridors x ∈ [−0.21, 0.21];
+    // Schlaufen-Unterkante ≈ y 0.92.
+    const bandGeo = new THREE.BoxGeometry(0.028, 0.13, 0.01).toNonIndexed();
+    bandGeo.translate(0, -0.065, 0);
+    const loopGeo = new THREE.TorusGeometry(0.05, 0.011, 6, 14).toNonIndexed();
+    loopGeo.translate(0, -0.175, 0);
+    const strapGeo = mergeGeometriesCompat([bandGeo, loopGeo]);
+    const strapMat = Mat.std({ color: 0xf0ede6, roughness: 0.75, envMapIntensity: 0.12 });
+    const railY = ROOF_Y - 0.62;
+    // z=3.4 ausgespart — dort stehen die vertikalen Stangen (±0.6, 3.4)
+    const strapZ = [-3.6, -2.2, -0.8, 0.6, 2.0, 3.0, 4.8];
+    this.strapInst = new THREE.InstancedMesh(strapGeo, strapMat, strapZ.length * 2);
+    const sm = new THREE.Matrix4();
+    let si = 0;
+    for (const sx of [-0.6, 0.6]) {
+      for (const z of strapZ) {
+        sm.makeTranslation(sx, railY, z);
+        this.strapInst.setMatrixAt(si++, sm);
+      }
+    }
+    this.strapInst.instanceMatrix.needsUpdate = true;
+    this.group.add(small(this.strapInst));
+
+    // Zwei Entwerter-Säulen (x=0.85): hinter Tür 2 und Richtung Tür 3.
+    // Plan-Z 2.95 kollidierte mit Sitzreihe z=2.8 (rechtes 2er-Paar) →
+    // in die Reihenlücke z=2.4 gelegt; Tür-Querwege z=0/3.7 bleiben frei.
+    const entwMat = Mat.std({ color: 0xd9a32a, roughness: 0.5, metalness: 0.2, envMapIntensity: 0.12 });
+    const entwFaceMat = new THREE.MeshStandardMaterial({
+      color: 0x10181c, roughness: 0.4, emissive: 0x1d4030, emissiveIntensity: 0.5,
+    });
+    const poleH = ROOF_Y - 0.6 - FLOOR_Y;
+    for (const z of [-0.85, 2.4]) {
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, poleH, 10), this.poleMat);
+      pole.position.set(0.85, (FLOOR_Y + ROOF_Y - 0.6) / 2, z);
+      this.group.add(pole); // wirft Schatten wie die übrigen Haltestangen
+      const device = new THREE.Mesh(new RoundedBoxGeometry(0.13, 0.32, 0.10, 2, 0.02), entwMat);
+      device.position.set(0.77, FLOOR_Y + 1.05, z);
+      const face = new THREE.Mesh(new THREE.PlaneGeometry(0.07, 0.18), entwFaceMat);
+      face.position.set(0.7035, FLOOR_Y + 1.07, z);
+      face.rotation.y = -Math.PI / 2;
+      const slot = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.02, 0.06), this.trimMat);
+      slot.position.set(0.77, FLOOR_Y + 1.22, z);
+      this.group.add(small(device), small(face), small(slot));
+    }
+
+    // Armaturen-Seitenverkleidung: schließt die Konsole zur Tür 1 hin ab
+    const dashSide = new THREE.Mesh(new RoundedBoxGeometry(0.05, 0.92, 0.74, 2, 0.02), this.dashMat);
+    dashSide.position.set(0.36, FLOOR_Y + 0.46, -5.25);
+    this.group.add(dashSide);
   }
 
   // ------------------------------------------------------------------ Update
@@ -674,10 +989,28 @@ export class BusModel {
       g.rotateX(-w.spinAngle);
     });
 
-    // Wischer: Parkstellung liegend (-1.2), Bogen ~100°
+    // Wischer: Parkstellung fast waagerecht (-1.5), Bogen ~100°
     const sweep = bus.wipers.sweep;
     for (const p of this.wiperPivots) {
-      p.rotation.z = -1.2 + sweep * 1.75;
+      p.rotation.z = -1.5 + sweep * 1.75;
+    }
+
+    // Fahrerfenster-Schiebescheibe: 1,2 s für den vollen Hub (0.62 m)
+    const dwt = this.driverWindowTarget;
+    if (this.driverWindowProgress < dwt) {
+      this.driverWindowProgress = Math.min(dwt, this.driverWindowProgress + dt / 1.2);
+    } else if (this.driverWindowProgress > dwt) {
+      this.driverWindowProgress = Math.max(dwt, this.driverWindowProgress - dt / 1.2);
+    }
+    this.driverWinSlider.position.z = this.driverWindowProgress * 0.62;
+
+    // IBIS-Ziel auf die Matrix-Außenanzeige spiegeln
+    if (bus.destination && bus.destination !== this._shownDestination) {
+      this._shownDestination = bus.destination;
+      const oldTex = this.destDisplay.material.map;
+      this.destDisplay.material.map = makeMatrixDisplay(`73  ${bus.destination}`);
+      this.destDisplay.material.needsUpdate = true;
+      if (oldTex) oldTex.dispose();
     }
 
     // Lichter

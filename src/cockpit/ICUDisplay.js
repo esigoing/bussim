@@ -1,6 +1,8 @@
 // Fahrer-Informationsdisplay (ICU) im Kombiinstrument:
 // Gang, Tacho digital, Kilometerstand, Uhrzeit, nächste Haltestelle,
-// Warnhinweise. CanvasTexture, Update mit 10 Hz.
+// Fahrplanlage (Abweichung wie beim echten Scania-ICU: Minuten:Sekunden,
+// '+' = verfrüht / '−' = verspätet, farbcodiert) und Warnhinweise.
+// CanvasTexture, Update mit 10 Hz.
 
 import * as THREE from 'three';
 
@@ -25,8 +27,9 @@ export class ICUDisplay {
     this._draw({ gearLabel: 'N', speed: 0, time: '10:30', warnings: [] });
   }
 
-  // Platzhalter-API fürs Fahrplan-System: Sekunden (+verspätet/−verfrüht)
-  // oder null = keine Anzeige.
+  // Fahrplan-Anbindung (WP-C3): Abweichung in Sekunden, + = verspätet /
+  // − = verfrüht (Konvention von BusRoute.delaySeconds), null = keine
+  // Anzeige. Die ANZEIGE folgt der RBL-Konvention: '+' = früh, '−' = spät.
   setDelay(seconds) {
     this.delay = seconds;
   }
@@ -79,15 +82,6 @@ export class ICUDisplay {
     ctx.textAlign = 'right';
     ctx.fillText(time, W - 10, 21);
 
-    // Fahrplan-Abweichung mittig im Kopf: '+2:30' (zu spät) / '-0:45' (zu früh)
-    if (this.delay !== null && this.delay !== undefined) {
-      const s = Math.round(Math.abs(this.delay));
-      const txt = `${this.delay < 0 ? '-' : '+'}${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-      ctx.fillStyle = this.delay > 0 ? '#ff8b7d' : '#8fe39b';
-      ctx.textAlign = 'center';
-      ctx.fillText(txt, W / 2, 21);
-    }
-
     // Gang groß
     ctx.fillStyle = '#7fd4ff';
     ctx.font = 'bold 52px Arial';
@@ -118,6 +112,23 @@ export class ICUDisplay {
     ctx.font = 'bold 16px Arial';
     ctx.textAlign = 'left';
     ctx.fillText(`▶ ${this.nextStop}`, 10, 141);
+
+    // Fahrplanlage rechts in der Haltestellen-Leiste (wie beim Scania-ICU):
+    // Minuten:Sekunden, '+' = verfrüht / '−' = verspätet (RBL-Konvention,
+    // intern ist delay > 0 = verspätet). Farbe: grün = pünktlich (±60 s),
+    // rot = verspätet, gelb = zu früh.
+    if (this.delay !== null && this.delay !== undefined) {
+      const late = this.delay > 0;
+      const s = Math.round(Math.abs(this.delay));
+      const txt = `${late ? '−' : '+'}${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+      ctx.font = 'bold 15px Arial';
+      const tw = ctx.measureText(txt).width;
+      ctx.fillStyle = s <= 60 ? '#1d7a42' : late ? '#b3271e' : '#a87f16';
+      ctx.fillRect(W - tw - 26, 126, tw + 18, 19);
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'right';
+      ctx.fillText(txt, W - 17, 141);
+    }
 
     // Kilometerstand
     ctx.fillStyle = '#8b95a0';

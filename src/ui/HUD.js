@@ -10,6 +10,12 @@ function fmtClock(hours) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
+// Abweichung in Sekunden → "+m:ss" (+ = verspätet, − = verfrüht)
+function fmtDelta(sec) {
+  const t = Math.round(Math.abs(sec));
+  return `${sec >= 0 ? '+' : '−'}${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
+}
+
 export class HUD {
   constructor() {
     this.elStop = document.querySelector('#nextStop .stop-name');
@@ -41,7 +47,8 @@ export class HUD {
       else if (reason === 'timeout') this.message('Fahrgast hat passend gezahlt', true);
       else this.message('Fahrgast nimmt das Ticket trotzdem', true);
     });
-    Events.on('punctualBonus', ({ bonus }) => {
+    Events.on('punctualBonus', ({ bonus, earnings }) => {
+      if (earnings !== undefined) this.earnings = earnings;
       this.message(`Pünktlich abgefahren ✓ Bonus +${bonus.toFixed(2)} €`);
     });
     Events.on('doorBlocked', () => this.message('Türfreigabe nur im Stand (< 3 km/h)', true));
@@ -74,14 +81,17 @@ export class HUD {
     if (cls === 'ontime') {
       this.elDelay.textContent = 'pünktlich';
     } else {
-      const a = Math.abs(delayMin);
-      const m = Math.floor(a);
-      const s = Math.round((a - m) * 60);
-      this.elDelay.textContent = `${delayMin > 0 ? '+' : '−'}${m}:${String(s).padStart(2, '0')}`;
+      this.elDelay.textContent = fmtDelta(delayMin * 60);
     }
   }
 
-  // Fahrplan-Overlay: rows = [{name, plannedHours, state: 'passed'|'next'|''}]
+  // Fahrplan-Overlay sichtbar? (Game aktualisiert die Zeilen nur dann)
+  get timetableVisible() {
+    return this.elTimetable.classList.contains('visible');
+  }
+
+  // Fahrplan-Overlay:
+  // rows = [{name, plannedHours|null, state: 'passed'|'next'|'', delaySec|null}]
   toggleTimetable(rows) {
     const vis = this.elTimetable.classList.toggle('visible');
     if (vis && rows) this.renderTimetable(rows);
@@ -89,9 +99,18 @@ export class HUD {
   }
 
   renderTimetable(rows) {
-    this.elTimetableBody.innerHTML = rows.map((r) =>
-      `<tr class="${r.state}"><td>${r.name}</td><td style="text-align:right">${fmtClock(r.plannedHours)}</td></tr>`
-    ).join('');
+    this.elTimetableBody.innerHTML = rows.map((r) => {
+      const time = r.plannedHours === null || r.plannedHours === undefined
+        ? '—' : fmtClock(r.plannedHours);
+      let delta = '';
+      if (r.delaySec !== null && r.delaySec !== undefined) {
+        const cls = r.delaySec > 45 ? 'late' : r.delaySec < -45 ? 'early' : 'ontime';
+        delta = `<span class="tt-delay ${cls}">${fmtDelta(r.delaySec)}</span>`;
+      }
+      return `<tr class="${r.state}"><td>${r.name}</td>` +
+        `<td style="text-align:right">${time}</td>` +
+        `<td style="text-align:right">${delta}</td></tr>`;
+    }).join('');
   }
 
   update(dt, bus) {

@@ -176,22 +176,23 @@ export class Cockpit {
     // Kontrollleuchten-Reihe zwischen Tacho und ICU
     this._buildTelltales();
 
-    // ---------- Lenksäule (näher am Fahrer → Kranz verdeckt nichts)
+    // ---------- Lenksäule (etwas höher + an die Konsole gerückt; Kranz
+    // bleibt unter der Sichtlinie Fahrerauge → ICU-Unterkante)
     this.column = new SteeringColumn(dashMat);
-    this.column.group.position.set(-0.6, CAB_FLOOR + 0.92, -4.78);
+    this.column.group.position.set(-0.6, CAB_FLOOR + 0.96, -4.88);
     this.group.add(this.column.group);
 
     // Blinkerhebel-Klickzonen (über/unter dem Hebel, mit der Säule gewandert)
     this.buttons.createZone({
       size: new THREE.Vector3(0.1, 0.07, 0.16),
-      position: new THREE.Vector3(-0.78, CAB_FLOOR + 0.86, -4.9),
+      position: new THREE.Vector3(-0.78, CAB_FLOOR + 0.9, -5.0),
       parent: this.group,
       name: 'stalkUp',
       action: () => this._stalk(1),
     });
     this.buttons.createZone({
       size: new THREE.Vector3(0.1, 0.07, 0.16),
-      position: new THREE.Vector3(-0.78, CAB_FLOOR + 0.7, -4.9),
+      position: new THREE.Vector3(-0.78, CAB_FLOOR + 0.74, -5.0),
       parent: this.group,
       name: 'stalkDown',
       action: () => this._stalk(-1),
@@ -199,10 +200,20 @@ export class Cockpit {
     // Hebelspitze drücken = Fernlicht (nur bei Abblendlicht wirksam)
     this.buttons.createZone({
       size: new THREE.Vector3(0.12, 0.08, 0.16),
-      position: new THREE.Vector3(-0.9, CAB_FLOOR + 0.78, -4.9),
+      position: new THREE.Vector3(-0.9, CAB_FLOOR + 0.82, -5.0),
       parent: this.group,
       name: 'stalkPush',
       action: () => this._stalkPush(),
+    });
+
+    // Fahrerfenster: Klick auf die Schiebescheibe links öffnet/schließt
+    // (BusModel animiert in 1,2 s; Event 'windowSlide' fürs Audio)
+    this.buttons.createZone({
+      size: new THREE.Vector3(0.10, 0.55, 0.75),
+      position: new THREE.Vector3(-1.21, 0.72, -5.0),
+      parent: this.group,
+      name: 'driverWindow',
+      action: () => busModel.toggleDriverWindow(),
     });
 
     // ---------- Tasterfelder

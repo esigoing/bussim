@@ -98,6 +98,7 @@
       border-radius: 4px; padding: 1px 8px; font-size: 13px;
     }
     #nextStop .stop-name { font-weight: 600; }
+    #nextStop #scheduleBox { display: flex; gap: 10px; align-items: baseline; }
     #nextStop .plan-time { color: var(--dim); font-size: 12px; font-variant-numeric: tabular-nums; }
     #nextStop .delay-chip {
       font-size: 12px; font-weight: 700; border-radius: 4px; padding: 1px 7px;
@@ -128,6 +129,9 @@
     }
     #timetable tr.next td { color: var(--accent); font-weight: 600; }
     #timetable tr.passed td { color: rgba(255,255,255,0.3); }
+    #timetable .tt-delay.late { color: #ff8a7a; }
+    #timetable .tt-delay.early { color: #8ec4ff; }
+    #timetable .tt-delay.ontime { color: #7ddb96; }
     #timetable .tt-hint { margin-top: 10px; font-size: 11px; color: var(--dim); }
     #hudMsg {
       position: absolute; top: 76px; left: 50%; transform: translateX(-50%);
@@ -176,8 +180,10 @@
   <div id="hud">
     <div id="nextStop">
       <span class="line-badge">73</span><span class="stop-name">—</span>
-      <span class="plan-time" id="planTime"></span>
-      <span class="delay-chip" id="delayChip">—</span>
+      <span id="scheduleBox">
+        <span class="plan-time" id="planTime"></span>
+        <span class="delay-chip" id="delayChip">—</span>
+      </span>
     </div>
     <div id="timetable">
       <h2>Linie <span>73</span> · Fahrplan</h2>
@@ -193,7 +199,9 @@
       <kbd>W</kbd>/<kbd>S</kbd> Gas/Bremse · <kbd>A</kbd>/<kbd>D</kbd> Lenken ·
       Rechtsklick ziehen – Umsehen<br>
       Linksklick – Cockpit-Tasten · <kbd>F1</kbd>–<kbd>F4</kbd> Kamera ·
-      <kbd>R</kbd>/<kbd>F</kbd> Blinker · <kbd>Leertaste</kbd> Haltestellenbremse
+      <kbd>R</kbd>/<kbd>F</kbd> Blinker · <kbd>Leertaste</kbd> Haltestellenbremse<br>
+      <kbd>O</kbd> Fahrplan · <kbd>G</kbd> Fahrerfenster · <kbd>B</kbd> Fernlicht ·
+      <kbd>V</kbd> Retarder · <kbd>E</kbd> Türfreigabe
     </div>
   </div>
 
@@ -233,8 +241,9 @@
       <div class="menu-footer">
         <b>Fahren:</b> <kbd>W</kbd> Gas · <kbd>S</kbd> Bremse (1. Stufe Retarder) · <kbd>A</kbd>/<kbd>D</kbd> Lenken<br>
         <b>Cockpit:</b> Linksklick auf Tasten &amp; Fahrscheindrucker · Rechtsklick ziehen zum Umsehen<br>
-        <b>Sonstiges:</b> <kbd>R</kbd>/<kbd>F</kbd> Blinker · <kbd>1</kbd>–<kbd>3</kbd> Türen · <kbd>K</kbd> Kneeling · <kbd>L</kbd> Licht ·
-        <kbd>U</kbd> Wischer · <kbd>P</kbd> Feststellbremse · <kbd>M</kbd> D/N/R · <kbd>Leertaste</kbd> Haltestellenbremse
+        <b>Sonstiges:</b> <kbd>R</kbd>/<kbd>F</kbd> Blinker · <kbd>1</kbd>–<kbd>3</kbd> Türen · <kbd>K</kbd> Kneeling · <kbd>L</kbd> Licht (3-stufig) ·
+        <kbd>B</kbd> Fernlicht · <kbd>U</kbd> Wischer · <kbd>P</kbd> Feststellbremse · <kbd>M</kbd> D/N/R · <kbd>Leertaste</kbd> Haltestellenbremse<br>
+        <b>Service:</b> <kbd>E</kbd> Türfreigabe · <kbd>V</kbd> Retarder · <kbd>G</kbd> Fahrerfenster · <kbd>O</kbd> Fahrplan · <kbd>H</kbd> Warnblinker
       </div>
     </div>
   </div>

@@ -15,9 +15,10 @@ const EXIT_DOORS = [new THREE.Vector3(1.05, BUS_FLOOR, 0), new THREE.Vector3(1.0
 const _tmp = new THREE.Vector3();
 
 export class Passenger {
-  constructor(rand, stopIndex, destIndex) {
+  // figureOpts: {detail, props, rainy} aus dem Grafik-Preset (WP-A4/E1)
+  constructor(rand, stopIndex, destIndex, figureOpts = {}) {
     this.rand = rand;
-    this.figure = new HumanFigure(rand);
+    this.figure = new HumanFigure(rand, figureOpts);
     this.group = this.figure.group;
     this.state = 'WAIT';
     this.stopIndex = stopIndex;

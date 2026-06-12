@@ -60,7 +60,7 @@ export class Minimap {
       const [mx, my] = this._w2m(x, z);
       if (i === 0) ctx.moveTo(mx, my); else ctx.lineTo(mx, my);
     });
-    ctx.closePath();
+    if (route.closed !== false) ctx.closePath(); // nur Rundkurse schließen
     ctx.stroke();
 
     // Haltestellen

@@ -132,10 +132,12 @@ function makeBodyType(t) {
     detail.push(box);
     addCommonParts(t, 1.95, dark, detail);
   }
+  // RoundedBox ist nicht indiziert, Box schon — vor dem Merge vereinheitlichen
+  const norm = (arr) => arr.map((g) => (g.index ? g.toNonIndexed() : g));
   return {
-    paint: mergeGeometries(paint),
-    dark: mergeGeometries(dark),
-    detail: mergeGeometries(detail),
+    paint: mergeGeometries(norm(paint)),
+    dark: mergeGeometries(norm(dark)),
+    detail: mergeGeometries(norm(detail)),
   };
 }
 

@@ -1,14 +1,28 @@
-// Linie 73: Rechteck-Rundkurs über vier Rasterstraßen (nur Rechtsabbiegen),
-// 9 benannte Haltestellen mit Wartehäuschen, Schild und Bucht-Position.
+// Linie 73: geschlossener Rundkurs aus einer expliziten Lane-Key-Sequenz
+// (Links- UND Rechtskurven, durch alle Viertel; bei Lücken in der Kantenfolge
+// Fallback auf das alte Rechteck), 9 benannte Haltestellen mit Wartehäuschen,
+// Schild und Bucht-Position. Dazu der Fahrplan (WP-C3): Soll-Ankünfte aus der
+// Routendistanz (Ø ~19 km/h Fahrt + 20 s Standzeit je Halt), verankert an der
+// Abfahrt an Stop 0 und rollierend je Runde neu verankert.
+// Alle Fahrplan-Zeiten sind Sekunden auf der game.time-Uhr (reale Sekunden).
+// WP-E3: Die Häuschen-Rückwände bekommen statische Kollisionsboxen für den
+// Bus (addShelterCollision) — sie stehen gut 2 m neben der Busflanke und
+// fangen nur echte Fehlfahrten ab.
 
 import * as THREE from 'three';
 import * as Mat from '../graphics/materials/MatLib.js';
 import { Events } from '../core/Events.js';
+import { StaticAABB } from '../physics/Collision.js';
 
 export const STOP_NAMES = [
   'Hauptbahnhof', 'Rathaus', 'Schillerplatz', 'Stadtpark', 'Klinikum',
   'Universität', 'Marktplatz', 'Goethestraße', 'Theater',
 ];
+
+// Fahrplan-Parameter: Ø-Reisegeschwindigkeit (inkl. Ampeln/Kurven) und
+// Sollstandzeit je bedientem Halt
+const SCHED_SPEED = 19 / 3.6; // m/s ≈ 19 km/h
+const SCHED_DWELL = 20;       // s
 
 function stopSignTexture(name) {
   const c = document.createElement('canvas');
@@ -45,20 +59,78 @@ function stopSignTexture(name) {
 }
 
 export class BusRoute {
-  // rect: {i0, j0, i1, j1} Rasterindizes des Rundkurses
-  constructor({ roadNet, rect, parent }) {
+  // laneKeys:  explizite, geschlossene Lane-Key-Sequenz ("NS,i,j,dir,laneIdx" /
+  //            "EW,j,i,dir,laneIdx") — die bevorzugte Routen-Definition.
+  // rect:      {i0, j0, i1, j1} Rasterindizes — Fallback-Rechteck, falls die
+  //            Sequenz Lücken hat (z. B. nach Topologie-Änderungen am Raster).
+  // collision: optionales Kollisionssystem (physics/Collision) — registriert
+  //            die Häuschen-Rückwände als StaticAABBs für den Bus. Kann auch
+  //            später per addShelterCollision(collision) nachgereicht werden.
+  constructor({ roadNet, laneKeys = null, rect = null, parent, collision = null }) {
     this.roadNet = roadNet;
     this.edges = [];        // Kantenfolge inkl. Verbindungs-/Abbiegekanten
     this.cumLength = [];    // kumulierte Länge am Kantenanfang
     this.totalLength = 0;
     this.stops = [];
+    this.closed = true;     // Rundkurs — Minimap zieht closePath() nur dann
+    this.shelterColliders = [];        // Welt-AABBs der Häuschen-Rückwände
+    this._shelterCollisionAdded = false;
     this.group = new THREE.Group();
     parent.add(this.group);
 
-    this._buildSequence(rect);
+    // Explizite Sequenz validieren (nach der Stadtgenerierung: alle Keys
+    // müssen existieren, die Kantenfolge muss lückenlos schließen)
+    let lanes = laneKeys && laneKeys.length ? this._resolveLaneKeys(laneKeys) : null;
+    if (!lanes) {
+      if (laneKeys && laneKeys.length) {
+        console.warn('BusRoute: Fallback auf die Rechteck-Route', rect);
+      }
+      lanes = rect ? this._laneKeyEdges(rect).filter(Boolean) : [];
+    }
+
+    this._buildSequence(lanes);
     this._placeStops();
+    this._buildSchedule();
     this._buildShelters();
     this._buildRoutePolyline();
+    this.addShelterCollision(collision);
+  }
+
+  // WP-E3: Rückwand-Kollisionsboxen der Wartehäuschen beim Kollisionssystem
+  // registrieren — nur der Bus kollidiert mit StaticAABBs, Fußgänger und
+  // Verkehr bleiben unberührt. Idempotent; Game.init() ruft das nach der
+  // Stadtgenerierung mit world.collision auf (alternativ Konstruktor-Option).
+  addShelterCollision(collision) {
+    if (!collision || this._shelterCollisionAdded) return;
+    this._shelterCollisionAdded = true;
+    for (const box of this.shelterColliders) collision.addAABB(box);
+  }
+
+  // Lane-Key-Sequenz auflösen und prüfen: existieren alle Keys, und ist jedes
+  // aufeinanderfolgende Paar (inkl. Rundschluss) direkt oder über genau eine
+  // Zwischenkante (Through-Link/Abbieger) verbunden? Bei Lücke → null.
+  _resolveLaneKeys(keys) {
+    const lanes = [];
+    for (const key of keys) {
+      const e = this.roadNet.laneIndex.get(key);
+      if (!e) {
+        console.warn(`BusRoute: Lücke in der Kantenfolge — Lane-Key fehlt: ${key}`);
+        return null;
+      }
+      lanes.push(e);
+    }
+    for (let k = 0; k < lanes.length; k++) {
+      const cur = lanes[k];
+      const next = lanes[(k + 1) % lanes.length];
+      const direct = cur.successors.some((s) => s.edge === next);
+      const via = cur.successors.some((s) => s.edge.successors.some((t) => t.edge === next));
+      if (!direct && !via) {
+        console.warn('BusRoute: Lücke in der Kantenfolge bei Index', k,
+          `(${keys[k]} → ${keys[(k + 1) % keys.length]})`);
+        return null;
+      }
+    }
+    return lanes;
   }
 
   _laneKeyEdges(rect) {
@@ -74,8 +146,7 @@ export class BusRoute {
     return seq;
   }
 
-  _buildSequence(rect) {
-    const lanes = this._laneKeyEdges(rect).filter(Boolean);
+  _buildSequence(lanes) {
     if (lanes.length === 0) {
       console.error('BusRoute: keine Kanten gefunden');
       return;
@@ -142,6 +213,129 @@ export class BusRoute {
     this.stops.forEach((s, i) => { s.index = i; });
   }
 
+  // ------------------------------------------------------------- Fahrplan
+  // Soll-Zeiten aus der Routendistanz: SCHED_SPEED Fahrt + SCHED_DWELL
+  // Standzeit je bereits bedientem Halt. Anker = Abfahrt an Stop 0.
+  _buildSchedule() {
+    this.dwellTime = SCHED_DWELL;
+    const d0 = this.stops.length ? this.stops[0].routeDist : 0;
+    this.stops.forEach((stop, k) => {
+      const dd = this.totalLength > 0
+        ? (stop.routeDist - d0 + this.totalLength) % this.totalLength : 0;
+      // Soll-ANKUNFT k Sekunden nach Abfahrt an Stop 0 (Standzeiten 1..k-1)
+      stop.schedOffset = k === 0 ? 0 : dd / SCHED_SPEED + (k - 1) * SCHED_DWELL;
+      stop.actualArrival = null; // Ist-Ankunft der laufenden Runde
+    });
+    // Soll-Rundenzeit: einmal herum + Standzeiten an den Stops 1..n-1
+    this.roundTime = this.totalLength / SCHED_SPEED
+      + Math.max(0, this.stops.length - 1) * SCHED_DWELL;
+    this._anchor = null; // Spielzeit (s) der Soll-Abfahrt an Stop 0
+    this._lastDd = 0;    // letzter Streckenfortschritt (Rundenwechsel-Erkennung)
+  }
+
+  // Fahrplan an der (tatsächlichen) Abfahrt an Stop 0 verankern — zu
+  // Rundenbeginn und bei jeder erneuten Abfahrt aufrufen. Ohne Aufruf
+  // verankert updateSchedule() lazy (aktuelle Position gilt als pünktlich).
+  anchorSchedule(gameTime) {
+    this._anchor = gameTime;
+    for (const s of this.stops) s.actualArrival = null;
+  }
+
+  // Streckenfortschritt seit Stop 0 (m) aus einer Routen-Distanz
+  _progress(routeDist) {
+    if (!this.stops.length || this.totalLength <= 0) return 0;
+    return (routeDist - this.stops[0].routeDist + this.totalLength) % this.totalLength;
+  }
+
+  // Soll-Zeitbedarf (s) ab Abfahrt Stop 0 bis Fortschritt dd —
+  // Fahrzeit plus Standzeiten aller bereits passierten Halte
+  _plannedOffset(dd) {
+    let t = dd / SCHED_SPEED;
+    for (let k = 1; k < this.stops.length; k++) {
+      if (dd >= this._progress(this.stops[k].routeDist)) t += SCHED_DWELL;
+    }
+    return t;
+  }
+
+  // Soll-Ankunft an Stop k als absolute Spielzeit (s); Stop 0 liefert die
+  // Ankunft am RUNDENENDE. null, solange der Fahrplan nicht verankert ist.
+  plannedArrival(stopIndex) {
+    if (this._anchor === null) return null;
+    const s = this.stops[stopIndex];
+    if (!s) return null;
+    return this._anchor + (stopIndex === 0 ? this.roundTime : s.schedOffset);
+  }
+
+  // Soll-Abfahrt an Stop k (Ankunft + Standzeit); Stop 0 = der Anker selbst
+  plannedDeparture(stopIndex) {
+    if (this._anchor === null || !this.stops[stopIndex]) return null;
+    if (stopIndex === 0) return this._anchor;
+    return this.plannedArrival(stopIndex) + SCHED_DWELL;
+  }
+
+  // Live-Abweichung (s) an einer Routenposition: + = verspätet, − = verfrüht.
+  // null, solange kein Anker existiert.
+  delaySeconds(routeDist, gameTime) {
+    if (this._anchor === null || !this.stops.length || this.totalLength <= 0) return null;
+    return gameTime - (this._anchor + this._plannedOffset(this._progress(routeDist)));
+  }
+
+  // Abweichung an einem konkreten Halt (z. B. bei Ankunft/Abfahrt prüfen)
+  delayAtStop(stopIndex, gameTime) {
+    const planned = this.plannedArrival(stopIndex);
+    return planned === null ? null : gameTime - planned;
+  }
+
+  // Nächster Halt mit Sollzeit + Live-Abweichung (fürs HUD/scheduleBox)
+  nextStopInfo(routeDist, gameTime) {
+    const stop = this.nextStopAfter(routeDist);
+    if (!stop) return null;
+    return {
+      stop,
+      plannedArrival: this.plannedArrival(stop.index),
+      delay: this.delaySeconds(routeDist, gameTime),
+    };
+  }
+
+  // Alle Halte fürs Fahrplan-Overlay: Soll-Ankunft/-Abfahrt (absolute
+  // Spielzeit in s oder null) + Ist-Ankunft der laufenden Runde
+  scheduleList() {
+    return this.stops.map((s) => ({
+      index: s.index,
+      name: s.name,
+      plannedArrival: this.plannedArrival(s.index),
+      plannedDeparture: this.plannedDeparture(s.index),
+      actualArrival: s.actualArrival,
+    }));
+  }
+
+  // Pro Frame aufrufen (Game, mit der Routen-Distanz des Busses und
+  // game.time): verankert lazy, erkennt den Rundenwechsel an Stop 0
+  // (rollierende Neu-Verankerung: Soll-Abfahrt = Ankunft + Standzeit),
+  // protokolliert Ist-Ankünfte und liefert die aktuelle Abweichung (s).
+  updateSchedule(routeDist, gameTime) {
+    if (!this.stops.length || this.totalLength <= 0) return null;
+    const dd = this._progress(routeDist);
+    if (this._anchor === null) {
+      this._anchor = gameTime - this._plannedOffset(dd);
+    }
+    if (this._lastDd - dd > this.totalLength * 0.5) {
+      // Runde geschlossen: neu verankern (Phase F darf den Anker bei der
+      // tatsächlichen Abfahrt mit anchorSchedule(gameTime) präzisieren)
+      this.anchorSchedule(gameTime + SCHED_DWELL);
+      this.stops[0].actualArrival = gameTime;
+    } else {
+      for (let k = 1; k < this.stops.length; k++) {
+        const sd = this._progress(this.stops[k].routeDist);
+        if (sd > this._lastDd && sd <= dd && this.stops[k].actualArrival === null) {
+          this.stops[k].actualArrival = gameTime;
+        }
+      }
+    }
+    this._lastDd = dd;
+    return this.delaySeconds(routeDist, gameTime);
+  }
+
   _buildShelters() {
     const frameMat = Mat.std({ color: 0x4a4d52, roughness: 0.5, metalness: 0.6 });
     const glassMat = Mat.phys({
@@ -189,6 +383,21 @@ export class BusRoute {
       g.rotation.y = yaw;
       g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
       this.group.add(g);
+
+      // Statische Kollisionsbox der Rückwand (WP-E3, nur für den Bus):
+      // Welt-AABB der gedrehten Wand (Häuschen-lokal x≈0.72, 3,6 m lang,
+      // hier 0,2 m dick gefasst — deckt auch die Pfosten bei z=±1.6).
+      // Häuschen-lokal zeigt +x zur Fahrbahn (= −right), +z in Fahrtrichtung.
+      const il = 1 / (Math.hypot(stop.dir.x, stop.dir.z) || 1);
+      const fx = stop.dir.x * il, fz = stop.dir.z * il; // Fahrtrichtung (XZ, normiert)
+      const cx = stop.shelterPos.x + fz * 0.72;         // Wandmitte in Weltkoordinaten
+      const cz = stop.shelterPos.z - fx * 0.72;
+      const hx = Math.abs(fz) * 0.10 + Math.abs(fx) * 1.80;
+      const hz = Math.abs(fx) * 0.10 + Math.abs(fz) * 1.80;
+      const baseY = stop.pos.y + 0.13;
+      this.shelterColliders.push(
+        new StaticAABB(cx - hx, cz - hz, cx + hx, cz + hz, baseY + 2.2)
+      );
     }
   }
 

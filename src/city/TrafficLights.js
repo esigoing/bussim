@@ -69,11 +69,12 @@ export class TrafficLights {
       { x: center.x - halfX - 1.2, z: center.z + halfZ + 1.2, axis: 'EW', rotY: -Math.PI / 2 },
     ];
     for (const c of corners) {
-      this._poles.push({ x: c.x, z: c.z });
-      this._boxes.push({ x: c.x, z: c.z, rotY: c.rotY });
+      // center.y = Terrainhöhe der Kreuzung — Masten stehen sonst auf Hügeln in der Luft
+      this._poles.push({ x: c.x, y: center.y, z: c.z });
+      this._boxes.push({ x: c.x, y: center.y, z: c.z, rotY: c.rotY });
       const lampBase = this._lampData.length;
       for (let i = 0; i < 3; i++) {
-        this._lampData.push({ x: c.x, y: 3.32 - i * 0.24, z: c.z, rotY: c.rotY });
+        this._lampData.push({ x: c.x, y: center.y + 3.32 - i * 0.24, z: c.z, rotY: c.rotY });
       }
       this.heads.push({ controller: ctrl, axis: c.axis, lampBase });
     }
@@ -85,7 +86,7 @@ export class TrafficLights {
     const poleInst = new THREE.InstancedMesh(this.poleGeo, this.poleMat, this._poles.length);
     const m = new THREE.Matrix4();
     this._poles.forEach((p, i) => {
-      m.makeTranslation(p.x, 1.8 + 0.12, p.z);
+      m.makeTranslation(p.x, p.y + 1.8 + 0.12, p.z);
       poleInst.setMatrixAt(i, m);
     });
     poleInst.castShadow = true;
@@ -95,7 +96,7 @@ export class TrafficLights {
     const boxInst = new THREE.InstancedMesh(this.boxGeo, this.boxMat, this._boxes.length);
     this._boxes.forEach((b, i) => {
       m.makeRotationY(b.rotY);
-      m.setPosition(b.x, 3.1 + 0.12, b.z);
+      m.setPosition(b.x, b.y + 3.1 + 0.12, b.z);
       boxInst.setMatrixAt(i, m);
     });
     boxInst.castShadow = true;
